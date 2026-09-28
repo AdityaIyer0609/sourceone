@@ -1,6 +1,7 @@
 import { ChevronDown, ChevronRight, Settings2, Sparkles, X } from "lucide-react";
 import { NavLink } from "react-router-dom";
 import { commerceNav, controlCentreNav, type NavItem } from "../../app/navigation";
+import { getDemoUser } from "../../lib/api/demoAuth";
 import { Button } from "../ui";
 import { Logo } from "./Logo";
 
@@ -15,6 +16,7 @@ function SidebarLink({ item, onNavigate }: { item: NavItem; onNavigate: () => vo
 }
 
 export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const demoUser = getDemoUser();
   return (
     <aside className={`sidebar ${open ? "is-open" : ""}`}>
       <div className="sidebar__top">
@@ -38,8 +40,8 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
         <ChevronRight size={16} />
       </div>
       <div className="user-strip">
-        <div className="avatar">RM</div>
-        <div><strong>Rohan Mehta</strong><small>Procurement lead</small></div>
+        <div className="avatar">{demoUser?.initials ?? "RM"}</div>
+        <div><strong>{demoUser?.name ?? "Rohan Mehta"}</strong><small>{demoUser ? `${demoUser.role} · demo` : "Procurement lead"}</small></div>
         <Settings2 size={17} />
       </div>
     </aside>

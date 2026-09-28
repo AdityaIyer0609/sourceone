@@ -20,6 +20,16 @@ class Settings(BaseSettings):
     database_url: SecretStr
     database_echo: bool = False
 
+    # Business day boundaries (IST has no DST, so a fixed offset is exact).
+    business_utc_offset_minutes: int = 330
+
+    pricing_history_min_points: int = 2
+    pricing_volatility_min_points: int = 5
+    pricing_negotiation_window_days: int = 30
+
+    # Header-based identity for local demos only; never enable in a shared environment.
+    demo_auth_enabled: bool = False
+
 
 @lru_cache
 def get_settings() -> Settings:

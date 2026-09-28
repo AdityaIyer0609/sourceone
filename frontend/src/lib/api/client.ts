@@ -1,3 +1,5 @@
+import { demoAuthHeaders } from './demoAuth'
+
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '/api/v1').replace(/\/+$/, '')
 
 type QueryValue = string | number | boolean | null | undefined
@@ -10,13 +12,28 @@ export interface RequestOptions extends Omit<RequestInit, 'method' | 'body'> {
 export class ApiError extends Error {
   readonly status: number
   readonly data: unknown
+  /** Domain error code, e.g. FOUR_EYES_REQUIRED, when the backend provides one. */
+  readonly code?: string
 
   constructor(status: number, message: string, data: unknown) {
     super(message)
     this.name = 'ApiError'
     this.status = status
     this.data = data
+    this.code = extractErrorCode(data)
   }
+}
+
+interface DomainErrorBody {
+  error: { code?: unknown; message?: unknown }
+}
+
+function isDomainError(data: unknown): data is DomainErrorBody {
+  return !!data && typeof data === 'object' && 'error' in data && !!(data as DomainErrorBody).error && typeof (data as DomainErrorBody).error === 'object'
+}
+
+function extractErrorCode(data: unknown): string | undefined {
+  return isDomainError(data) && typeof data.error.code === 'string' ? data.error.code : undefined
 }
 
 function buildUrl(path: string, query?: Record<string, QueryValue>): string {
@@ -39,9 +56,11 @@ async function parseBody(response: Response): Promise<unknown> {
   return text || undefined
 }
 
-// FastAPI returns errors as { detail: string } or { detail: [{ msg: string }, ...] }.
+// Domain errors are { error: { code, message, details } }; FastAPI's own errors are
+// { detail: string } or { detail: [{ msg: string }, ...] }.
 function extractErrorMessage(data: unknown): string | undefined {
   if (typeof data === 'string') return data
+  if (isDomainError(data) && typeof data.error.message === 'string') return data.error.message
   if (!data || typeof data !== 'object' || !('detail' in data)) return undefined
   const { detail } = data as { detail: unknown }
   if (typeof detail === 'string') return detail
@@ -58,6 +77,9 @@ async function request<T>(method: string, path: string, options: RequestOptions 
   const { query, body, headers, ...init } = options
   const requestHeaders = new Headers(headers)
   if (!requestHeaders.has('Accept')) requestHeaders.set('Accept', 'application/json')
+  for (const [name, value] of Object.entries(demoAuthHeaders())) {
+    if (!requestHeaders.has(name)) requestHeaders.set(name, value)
+  }
   if (body !== undefined && !requestHeaders.has('Content-Type')) {
     requestHeaders.set('Content-Type', 'application/json')
   }
@@ -94,4 +116,14 @@ export const apiClient = {
 export function getErrorMessage(error: unknown): string {
   if (error instanceof Error && error.message) return error.message
   return 'An unexpected error occurred.'
+}
+
+export function getErrorTitle(error: unknown): string {
+  if (!(error instanceof ApiError)) return 'Something went wrong'
+  if (error.status === 0) return 'Server unreachable'
+  if (error.status === 401) return 'Sign-in required'
+  if (error.status === 403) return 'Permission denied'
+  if (error.status === 404) return 'Not found'
+  if (error.status === 409 || error.status === 422) return 'Request not accepted'
+  return 'Something went wrong'
 }

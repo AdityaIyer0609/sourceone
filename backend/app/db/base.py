@@ -1,5 +1,10 @@
-from sqlalchemy import MetaData
-from sqlalchemy.orm import DeclarativeBase
+import uuid
+from datetime import datetime
+
+from sqlalchemy import DateTime, MetaData, func
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+
+from app.core.clock import utcnow
 
 NAMING_CONVENTION = {
     "ix": "ix_%(column_0_label)s",
@@ -12,3 +17,16 @@ NAMING_CONVENTION = {
 
 class Base(DeclarativeBase):
     metadata = MetaData(naming_convention=NAMING_CONVENTION)
+
+
+class UUIDPrimaryKey:
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+
+
+class Timestamps:
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow, server_default=func.now()
+    )

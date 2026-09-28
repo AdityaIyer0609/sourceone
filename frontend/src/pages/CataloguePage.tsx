@@ -1,16 +1,22 @@
 import { ChevronDown, FileText, SearchX, SlidersHorizontal } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { paths } from "../app/paths";
+import { AsyncContent } from "../components/feedback/AsyncContent";
 import { EmptyState } from "../components/feedback/EmptyState";
 import { ProductCard } from "../components/product/ProductCard";
 import { Badge, Button, Checkbox, Heading } from "../components/ui";
-import { products } from "../mocks/data";
+import { useProducts } from "../lib/api/useProducts";
 
 export function CataloguePage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const search = searchParams.get("q") ?? "";
-  const filtered = products.filter((product) => `${product.name} ${product.category} ${product.id}`.toLowerCase().includes(search.toLowerCase()));
+  const market = searchParams.get("market");
+  const { data: products = [], error, isLoading, reload } = useProducts();
+  const filtered = products.filter((product) =>
+    [product.name, product.category, product.subcategory ?? "", product.productCode, ...product.pricing.map((pricing) => pricing.market.label)]
+      .join(" ").toLowerCase().includes(search.toLowerCase()),
+  );
   return (
     <div className="page">
       <div className="page-heading">
@@ -33,14 +39,16 @@ export function CataloguePage() {
           <div><strong>Dispatch market</strong><ChevronDown size={16} /></div>
         </aside>
         <section>
-          <div className="result-meta"><span><strong>{filtered.length}</strong> matching items</span><Button variant="ghost">Sort: Recommended <ChevronDown size={15} /></Button></div>
-          {filtered.length > 0 ? (
-            <div className="catalogue-grid">
-              {filtered.map((product) => <ProductCard key={product.id} product={product} onOpen={() => navigate(paths.productDetail(product.id))} />)}
-            </div>
-          ) : (
-            <EmptyState icon={SearchX} title="No matching items" message={`Nothing in the item master matches “${search}”. Try a different grade, standard or SKU.`} />
-          )}
+          <AsyncContent isLoading={isLoading && !products.length} error={error} onRetry={reload} loadingLabel="Loading catalogue…">
+            <div className="result-meta"><span><strong>{filtered.length}</strong> matching items</span><Button variant="ghost">Sort: Recommended <ChevronDown size={15} /></Button></div>
+            {filtered.length > 0 ? (
+              <div className="catalogue-grid">
+                {filtered.map((product) => <ProductCard key={product.productCode} product={product} market={market} onOpen={() => navigate(paths.productDetail(product.productCode) + (market ? `?market=${encodeURIComponent(market)}` : ""))} />)}
+              </div>
+            ) : (
+              <EmptyState icon={SearchX} title="No matching items" message={search ? `Nothing in the item master matches “${search}”. Try a different grade, standard or SKU.` : "No catalogue products are available yet."} />
+            )}
+          </AsyncContent>
         </section>
       </div>
     </div>

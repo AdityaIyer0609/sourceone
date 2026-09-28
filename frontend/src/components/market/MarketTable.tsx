@@ -1,22 +1,37 @@
 import { ArrowDownRight, ArrowUpRight } from "lucide-react";
-import { rateRows } from "../../mocks/data";
+import type { BenchmarkSummary } from "../../lib/api/pricing";
+import { formatDate, formatMoney, formatPercent, formatSignedMoney, movementDirection, sparklineValues } from "../../lib/pricingFormat";
+import { Badge } from "../ui";
 import { Sparkline } from "./Sparkline";
 
-export function MarketTable({ compact = false }: { compact?: boolean }) {
+export function MarketTable({ benchmarks, compact = false, onSelect }: { benchmarks: BenchmarkSummary[]; compact?: boolean; onSelect?: (seriesCode: string) => void }) {
   return (
     <div className="market-table-wrap">
       <table className="market-table">
-        <thead><tr><th>Material</th><th>Live market rate</th><th>Today</th><th>7D movement</th><th>Market</th><th>Updated</th></tr></thead>
+        <thead><tr><th>Material</th><th>SourceOne benchmark</th><th>vs previous</th><th>7D movement</th><th>Market</th><th>As of</th></tr></thead>
         <tbody>
-          {rateRows.slice(0, compact ? 4 : 5).map((row) => {
-            const down = row[4].startsWith("−");
+          {(compact ? benchmarks.slice(0, 4) : benchmarks).map((benchmark) => {
+            const direction = movementDirection(benchmark);
+            const down = direction === "down";
+            const { current, movement } = benchmark;
             return (
-              <tr key={row[1]}>
-                <td><strong>{row[0]}</strong><small>{row[1]}</small></td>
-                <td><strong>{row[2]}</strong><small>/ kg · ex-works</small></td>
-                <td><span className={down ? "negative" : "positive"}>{down ? <ArrowDownRight size={14} /> : <ArrowUpRight size={14} />}{row[4]}</span><small>{row[3]}</small></td>
-                <td><Sparkline down={down} /></td>
-                <td>{row[5]}</td><td><small>{row[6]}</small></td>
+              <tr key={benchmark.seriesCode} onClick={onSelect ? () => onSelect(benchmark.seriesCode) : undefined}>
+                <td><strong>{benchmark.name}</strong><small>{benchmark.seriesCode}</small></td>
+                <td>
+                  <strong>{current ? formatMoney(current.value) : "Rate on request"}</strong>
+                  <small>{current ? `/ ${benchmark.unit.label} · ${benchmark.priceBasis.label.toLowerCase()} · ${benchmark.taxBasis.label}` : "No current benchmark"}</small>
+                </td>
+                <td>
+                  {direction && movement.percent !== null ? (
+                    <><span className={down ? "negative" : "positive"}>{down ? <ArrowDownRight size={14} /> : <ArrowUpRight size={14} />}{formatPercent(movement.percent)}</span><small>{movement.absolute ? formatSignedMoney(movement.absolute) : ""}</small></>
+                  ) : <small>No previous benchmark</small>}
+                </td>
+                <td><Sparkline down={down} values={sparklineValues(benchmark.sparkline.points)} /></td>
+                <td>{benchmark.market.label}</td>
+                <td>
+                  {current ? <small>{formatDate(current.freshness.asOfDate)}</small> : <small>—</small>}
+                  {current?.freshness.state === "stale" && <Badge tone="warning">STALE</Badge>}
+                </td>
               </tr>
             );
           })}
