@@ -1,4 +1,4 @@
-import { demoAuthHeaders } from './demoAuth'
+import { authHeaders, clearSession } from './auth'
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '/api/v1').replace(/\/+$/, '')
 
@@ -77,10 +77,11 @@ async function request<T>(method: string, path: string, options: RequestOptions 
   const { query, body, headers, ...init } = options
   const requestHeaders = new Headers(headers)
   if (!requestHeaders.has('Accept')) requestHeaders.set('Accept', 'application/json')
-  for (const [name, value] of Object.entries(demoAuthHeaders())) {
+  for (const [name, value] of Object.entries(authHeaders())) {
     if (!requestHeaders.has(name)) requestHeaders.set(name, value)
   }
-  if (body !== undefined && !requestHeaders.has('Content-Type')) {
+  const isForm = typeof FormData !== 'undefined' && body instanceof FormData
+  if (body !== undefined && !isForm && !requestHeaders.has('Content-Type')) {
     requestHeaders.set('Content-Type', 'application/json')
   }
 
@@ -90,7 +91,7 @@ async function request<T>(method: string, path: string, options: RequestOptions 
       ...init,
       method,
       headers: requestHeaders,
-      body: body === undefined ? undefined : JSON.stringify(body),
+      body: body === undefined ? undefined : isForm ? body : JSON.stringify(body),
     })
   } catch (error) {
     if (error instanceof DOMException && error.name === 'AbortError') throw error
@@ -99,6 +100,7 @@ async function request<T>(method: string, path: string, options: RequestOptions 
 
   const data = await parseBody(response)
   if (!response.ok) {
+    if (response.status === 401 && !path.endsWith('/auth/login')) clearSession()
     const message = extractErrorMessage(data) || response.statusText || `Request failed with status ${response.status}`
     throw new ApiError(response.status, message, data)
   }

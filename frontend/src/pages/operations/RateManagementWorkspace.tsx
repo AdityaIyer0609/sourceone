@@ -3,15 +3,19 @@ import { useState, type ReactNode } from "react";
 import { AsyncContent } from "../../components/feedback/AsyncContent";
 import { Badge, Button, Input } from "../../components/ui";
 import {
+  BENCHMARK_PRICE_FIELDS,
   listAdminBenchmarks,
   listAuditEvents,
   listRateSeries,
   listRateSources,
   listSourceRates,
+  setBenchmarkPriceField,
+  syncErp,
   type BenchmarkAdmin,
   type RateSeries,
   type SourceRate,
 } from "../../lib/api/pricing";
+import { getErrorMessage } from "../../lib/api/client";
 import { useApiQuery } from "../../lib/api/useApiQuery";
 import { formatDate, formatDateTime, formatMoney, titleCase } from "../../lib/pricingFormat";
 import { BenchmarkModal, SeriesModal, SourceRateModal, StatusBadge } from "./RateManagementModals";
@@ -56,6 +60,9 @@ export function RateManagementWorkspace() {
   const [view, setView] = useState<View>("queue");
   const [search, setSearch] = useState("");
   const [selection, setSelection] = useState<Selection>(null);
+  const [fieldError, setFieldError] = useState<string | null>(null);
+  const [syncNote, setSyncNote] = useState<string | null>(null);
+  const [syncing, setSyncing] = useState(false);
   const workspace = useApiQuery("rate-management", loadWorkspace);
   const data = workspace.data;
 
@@ -115,7 +122,7 @@ export function RateManagementWorkspace() {
       )),
     ],
     sources: () => [
-      ["Code", "Name", "Type", "Staleness", "Status", "Priority", ""],
+      ["Code", "Name", "Type", "Staleness", "Status", "Priority", "Benchmark field"],
       (data?.sources ?? []).filter((s) => matches(search, s.code, s.name, s.sourceType)).map((s) => (
         <tr key={s.id}>
           <td><strong>{s.code}</strong><small>Profile v{s.profileVersion}</small></td>
@@ -124,7 +131,7 @@ export function RateManagementWorkspace() {
           <td><strong>{s.stalenessDays} days</strong></td>
           <td><Badge tone={s.isActive ? "positive" : "neutral"}>{s.isActive ? "ACTIVE" : "INACTIVE"}</Badge></td>
           <td><small>{s.priority}</small></td>
-          <td />
+          <td>{s.benchmarkPriceField ? <select className="input" aria-label={`Benchmark field for ${s.code}`} value={s.benchmarkPriceField} style={{ border: "1px solid var(--line)", height: 32, padding: "0 6px" }} onChange={async (event) => { setFieldError(null); try { await setBenchmarkPriceField(s.id, event.target.value as typeof s.benchmarkPriceField); workspace.reload(); } catch (caught) { setFieldError(getErrorMessage(caught)); } }}>{BENCHMARK_PRICE_FIELDS.map((field) => <option key={field} value={field}>{field}</option>)}</select> : null}</td>
         </tr>
       )),
     ],
@@ -158,7 +165,9 @@ export function RateManagementWorkspace() {
       </div>
       <section className="section-block data-section">
         <div className="tabs">{VIEWS.map(([key, label]) => <Button key={key} variant="ghost" className={view === key ? "is-active" : ""} onClick={() => setView(key)}>{label}</Button>)}</div>
-        <div className="data-toolbar"><label className="search-box search-box--small"><Search size={17}/><Input placeholder="Search rate management…" value={search} onChange={(event) => setSearch(event.target.value)}/></label><div><Button variant="secondary" aria-disabled="true" title="Advanced filters are not available yet"><Filter size={16}/> Filter</Button><Button variant="secondary" aria-disabled="true" title="Export is not available yet">Export</Button></div></div>
+        {fieldError ? <p className="negative" role="alert">{fieldError}</p> : null}
+        {syncNote ? <p>{syncNote}</p> : null}
+        <div className="data-toolbar"><label className="search-box search-box--small"><Search size={17}/><Input placeholder="Search rate management…" value={search} onChange={(event) => setSearch(event.target.value)}/></label><div><Button variant="secondary" disabled={syncing} onClick={async () => { setSyncing(true); setSyncNote(null); try { const result = await syncErp(); setSyncNote(`ERP read complete (${result.status}). Prices imported: ${result.prices.imported}. Benchmarks published: ${result.prices.benchmarksPublished}.`); workspace.reload(); } catch (caught) { setSyncNote(getErrorMessage(caught)); } finally { setSyncing(false); } }}>Sync ERP</Button><Button variant="secondary" aria-disabled="true" title="Advanced filters are not available yet"><Filter size={16}/> Filter</Button><Button variant="secondary" aria-disabled="true" title="Export is not available yet">Export</Button></div></div>
         {empty ? (
           <div className="state-panel"><p>{view === "queue" ? "No drafts or submitted benchmarks are waiting for review." : "No matching records."}</p></div>
         ) : (

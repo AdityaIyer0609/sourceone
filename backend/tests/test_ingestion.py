@@ -7,8 +7,44 @@ from app.core.errors import SourceInactive, SourceRateNotEligible, SourceRateUnr
 from app.pricing import service
 from app.pricing.constants import BenchmarkStatus, ResolutionStatus
 from tests.factories import build_world
+from tests.test_api import as_user
 
 D1, D2 = date(2026, 9, 1), date(2026, 9, 8)
+
+
+def test_configured_field_keeps_other_erp_prices_and_does_not_publish(world):
+    profile = dict(world.erp_source.normalization_profile)
+    profile["benchmark_field"] = "GrandTotal"
+    profile["value_field"] = "GrandTotal"
+    profile["must_equal_fields"] = []
+    world.erp_source.normalization_profile = profile
+    row = world.row(1, "97.50", UnitPrice="90.00", Basic="91.00", Total="96.00", GrandTotal="97.50")
+    result = world.ingest(D1, [row])
+    rate = result.source_rates[0]
+    assert rate.resolution_status == ResolutionStatus.RESOLVED
+    assert rate.value == Decimal("97.5000")
+    assert rate.raw_payload["benchmarkField"] == "GrandTotal"
+    assert rate.raw_payload["row"]["UnitPrice"] == "90.00"
+    assert rate.raw_payload["row"]["Basic"] == "91.00"
+    assert rate.raw_payload["row"]["Total"] == "96.00"
+    assert rate.raw_payload["row"]["GrandTotal"] == "97.50"
+    assert result.suggestions[0].status == BenchmarkStatus.SUBMITTED
+    assert result.suggestions[0].published_at is None
+
+
+def test_platform_admin_sets_the_benchmark_field(client, world):
+    url = f"/api/v1/admin/pricing/sources/{world.erp_source.id}/benchmark-field"
+    denied = client.patch(url, json={"benchmarkPriceField": "Total"}, headers=as_user(world, "alice"))
+    assert denied.status_code == 403
+    saved = client.patch(url, json={"benchmarkPriceField": "Total"}, headers=as_user(world, "platform"))
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["benchmarkPriceField"] == "Total"
+    world.session.refresh(world.erp_source)
+    assert world.erp_source.normalization_profile["benchmark_field"] == "Total"
+    assert world.erp_source.normalization_profile["must_equal_fields"] == []
+    row = world.row(1, "97.50", UnitPrice="90.00", Basic="91.00", Total="96.00", GrandTotal="99.00")
+    rate = world.ingest(D1, [row]).source_rates[0]
+    assert rate.value == Decimal("96.0000") and rate.resolution_status == ResolutionStatus.RESOLVED
 
 
 def test_domestic_row_creates_resolved_eligible_source_rate(world):

@@ -27,8 +27,28 @@ class Settings(BaseSettings):
     pricing_volatility_min_points: int = 5
     pricing_negotiation_window_days: int = 30
 
-    # Header-based identity for local demos only; never enable in a shared environment.
-    demo_auth_enabled: bool = False
+    # Signs login tokens. Override outside local development.
+    auth_secret: SecretStr = SecretStr("sourceone-dev-auth-secret")
+    auth_token_ttl_seconds: int = 60 * 60 * 12
+
+    # SourceOne product files. Not ERP documents.
+    document_dir: Path = BACKEND_DIR / "var" / "product_documents"
+
+    # ERP (SQL Server) is read-only for SourceOne. The connection stays off unless explicitly enabled
+    # and fully configured; use a login that only has SELECT on the tables below.
+    erp_enabled: bool = False
+    erp_host: str | None = None
+    erp_port: int = 1433
+    erp_username: str | None = None
+    erp_password: SecretStr | None = None
+    erp_odbc_driver: str = "ODBC Driver 18 for SQL Server"
+    erp_encrypt: bool = True
+    erp_trust_server_certificate: bool = False
+    erp_login_timeout_seconds: int = 15
+    erp_query_timeout_seconds: int = 60
+    erp_price_database: str = "MaterialProcessing"
+    erp_customer_database: str = "Despatch"
+    erp_rate_source_code: str = "ERP-DOMESTICPRICE1"
 
 
 @lru_cache

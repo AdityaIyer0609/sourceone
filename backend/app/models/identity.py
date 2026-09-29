@@ -18,6 +18,9 @@ class Organisation(UUIDPrimaryKey, Timestamps, Base):
     name: Mapped[str] = mapped_column(String(255))
     org_type: Mapped[str] = mapped_column(String(16))
     is_active: Mapped[bool] = mapped_column(default=True, server_default=true())
+    # Dispatch origin for SourceOne freight estimates. Not an ERP location.
+    dispatch_pin: Mapped[str | None] = mapped_column(String(6))
+    dispatch_label: Mapped[str | None] = mapped_column(String(64))
 
 
 class User(UUIDPrimaryKey, Timestamps, Base):
@@ -26,6 +29,8 @@ class User(UUIDPrimaryKey, Timestamps, Base):
 
     email: Mapped[str] = mapped_column(String(320), unique=True)
     full_name: Mapped[str] = mapped_column(String(255))
+    # Null for service accounts, which never sign in. Never returned by the API.
+    password_hash: Mapped[str | None] = mapped_column(String(255))
     organisation_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("organisations.id"), index=True)
     is_active: Mapped[bool] = mapped_column(default=True, server_default=true())
     # Service accounts (e.g. the ingestion job) can author suggestions but never sign in.

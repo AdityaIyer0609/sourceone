@@ -53,11 +53,23 @@ def list_sources(db: DbSession, _: PricingAdmin):
     return [
         schemas.RateSourceOut(
             id=r.id, code=r.code, name=r.name, source_type=r.source_type, is_active=r.is_active,
-            priority=r.priority, staleness_days=r.staleness_days, publishing_policy=r.publishing_policy,
+            priority=r.priority, staleness_days=r.staleness_days,             publishing_policy=r.publishing_policy,
             profile_version=r.profile_version,
+            benchmark_price_field=service.benchmark_price_field(r),
         )
         for r in rows
     ]
+
+
+@router.patch("/sources/{source_id}/benchmark-field", response_model=schemas.RateSourceOut)
+def set_benchmark_field(source_id: uuid.UUID, body: schemas.BenchmarkFieldIn, db: DbSession, actor: PricingAdmin):
+    source = service.set_benchmark_price_field(db, actor, source_id, body.benchmark_price_field)
+    db.commit()
+    return schemas.RateSourceOut(
+        id=source.id, code=source.code, name=source.name, source_type=source.source_type, is_active=source.is_active,
+        priority=source.priority, staleness_days=source.staleness_days, publishing_policy=source.publishing_policy,
+        profile_version=source.profile_version, benchmark_price_field=service.benchmark_price_field(source),
+    )
 
 
 @router.get("/source-rates", response_model=list[schemas.SourceRateOut])

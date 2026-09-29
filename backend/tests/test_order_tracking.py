@@ -4,7 +4,7 @@ from sqlalchemy.exc import DBAPIError
 
 from app.models.order import OrderStatusEvent
 from app.orders.constants import FULFILMENT_FLOW
-from tests.test_api import as_user
+from tests.test_api import as_actor, as_user
 from tests.test_negotiations import _other_buyer
 from tests.test_orders import ORDERS, _negotiation, _place, product  # noqa: F401  (fixture)
 
@@ -78,9 +78,9 @@ def test_only_assigned_supplier_updates_and_buyer_is_read_only(client, world, pr
 def test_tracking_hidden_from_other_parties(client, world, product):
     order_id = _order(client, world, product)
     other = _other_buyer(world)
-    assert client.get(f"{ORDERS}/{order_id}/tracking", headers={"X-Demo-User": other.email}).status_code == 404
+    assert client.get(f"{ORDERS}/{order_id}/tracking", headers=as_actor(other)).status_code == 404
     assert client.post(f"{ORDERS}/{order_id}/status", json={"toStatus": "confirmed"},
-                       headers={"X-Demo-User": other.email}).status_code == 404
+                       headers=as_actor(other)).status_code == 404
     assert client.get(f"{ORDERS}/{order_id}/tracking").status_code == 401
 
 

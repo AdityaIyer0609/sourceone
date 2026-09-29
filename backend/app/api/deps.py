@@ -4,24 +4,24 @@ from typing import Annotated
 from fastapi import Depends, Header
 from sqlalchemy.orm import Session
 
-from app.core.config import get_settings
 from app.core.errors import NotAuthenticated
 from app.db.session import get_db
-from app.identity.service import Actor, actor_for, get_active_user_by_email
+from app.identity.service import Actor, actor_for
+from app.identity.tokens import read_user_id
+from app.models.identity import User
 
 DbSession = Annotated[Session, Depends(get_db)]
 
 
 def get_current_actor(
-    db: DbSession, x_demo_user: Annotated[str | None, Header()] = None
+    db: DbSession, authorization: Annotated[str | None, Header()] = None
 ) -> Actor:
-    if not get_settings().demo_auth_enabled:
-        raise NotAuthenticated("Sign-in is not configured for this environment.")
-    if not x_demo_user:
-        raise NotAuthenticated("Sign in to access SourceOne benchmarks.")
-    user = get_active_user_by_email(db, x_demo_user)
-    if user is None or user.is_system:
-        raise NotAuthenticated("Unknown or inactive user.")
+    if not authorization or not authorization.lower().startswith("bearer "):
+        raise NotAuthenticated("Sign in to continue.")
+    user_id = read_user_id(authorization.split(" ", 1)[1].strip())
+    user = db.get(User, user_id)
+    if user is None or not user.is_active or user.is_system:
+        raise NotAuthenticated("Sign in to continue.")
     return actor_for(db, user)
 
 

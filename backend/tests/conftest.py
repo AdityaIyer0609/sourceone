@@ -4,7 +4,6 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from app.core.config import get_settings
 from app.db.session import engine, get_db
 from app.main import app
 from tests.factories import World, build_world
@@ -29,8 +28,7 @@ def world(db) -> World:
 
 
 @pytest.fixture
-def client(db, monkeypatch):
-    monkeypatch.setattr(get_settings(), "demo_auth_enabled", True)
+def client(db):
     app.dependency_overrides[get_db] = lambda: db
     try:
         yield TestClient(app)

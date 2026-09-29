@@ -80,6 +80,18 @@ def _next_number(session: Session, now: datetime) -> str:
     return f"NEG-{business_today(now).year}-{sequence:04d}"
 
 
+def list_suppliers(session: Session, actor: Actor) -> list[User]:
+    """Active users who can supply. Buyers pick one when starting a negotiation."""
+    actor.require(NegotiationPermission.BUY)
+    users = session.scalars(
+        select(User).where(User.is_active.is_(True), User.is_system.is_(False)).options(selectinload(User.organisation))
+    ).all()
+    return [
+        user for user in users
+        if user.id != actor.user_id and NegotiationPermission.SUPPLY in get_user_permissions(session, user.id)
+    ]
+
+
 def _resolve_supplier(session: Session, supplier_user_id: uuid.UUID | None) -> User:
     if supplier_user_id is not None:
         supplier = session.get(User, supplier_user_id)

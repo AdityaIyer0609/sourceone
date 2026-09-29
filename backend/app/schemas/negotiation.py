@@ -80,6 +80,12 @@ class NegotiationOut(ApiModel):
     closed_reason: str | None
 
 
+class SupplierOptionOut(ApiModel):
+    id: uuid.UUID
+    name: str
+    organisation: str
+
+
 class CreateNegotiationIn(ApiModel):
     product_code: str = Field(min_length=1, max_length=64)
     series_code: str | None = None

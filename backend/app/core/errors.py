@@ -94,6 +94,11 @@ class DuplicateProductMapping(DomainError):
     status_code = 409
 
 
+class ProductInUse(DomainError):
+    code = "PRODUCT_IN_USE"
+    status_code = 409
+
+
 class NegotiationClosed(DomainError):
     code = "NEGOTIATION_CLOSED"
     status_code = 409
@@ -111,6 +116,28 @@ class DuplicateOrder(DomainError):
 
 class OrderClosed(DomainError):
     code = "ORDER_CLOSED"
+    status_code = 409
+
+
+class ErpDisabled(DomainError):
+    code = "ERP_DISABLED"
+    status_code = 503
+
+
+class ErpNotConfigured(DomainError):
+    code = "ERP_NOT_CONFIGURED"
+    status_code = 503
+
+
+class ErpUnavailable(DomainError):
+    """Never carries driver messages: they can contain host names or login details."""
+
+    code = "ERP_UNAVAILABLE"
+    status_code = 502
+
+
+class ErpSyncInProgress(DomainError):
+    code = "ERP_SYNC_IN_PROGRESS"
     status_code = 409
 
 

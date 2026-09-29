@@ -26,15 +26,17 @@ export function Input({
 export function Checkbox({
   label,
   count,
-  defaultChecked = false,
+  checked,
+  onChange,
 }: {
   label: string;
   count?: number;
-  defaultChecked?: boolean;
+  checked?: boolean;
+  onChange?: () => void;
 }) {
   return (
     <label>
-      <input type="checkbox" defaultChecked={defaultChecked} />
+      <input type="checkbox" checked={checked} onChange={onChange} />
       <span>{label}</span>
       {count !== undefined && <small>{count}</small>}
     </label>

@@ -9,7 +9,7 @@ from app.api.deps import DbSession, require_any
 from app.api.v1.negotiations import party_out, quantity_text
 from app.identity.service import Actor
 from app.models.order import Order
-from app.orders import service
+from app.orders import reorder, service
 from app.orders.constants import FULFILMENT_FLOW, OrderPermission, OrderStatus
 from app.schemas.order import (
     AgreedPriceOut,
@@ -18,6 +18,9 @@ from app.schemas.order import (
     OrderActionsOut,
     OrderOut,
     OrderProductOut,
+    ReorderIn,
+    ReorderItemOut,
+    ReorderOut,
     StatusChangeIn,
     StatusEventOut,
     TrackingOut,
@@ -112,6 +115,73 @@ def create_from_negotiation(negotiation_id: uuid.UUID, db: DbSession, actor: Par
 @router.get("", response_model=list[OrderOut])
 def list_orders(db: DbSession, actor: Participant, status: OrderStatus | None = None):
     return [_present(actor, o) for o in service.list_orders(db, actor, status=status)]
+
+
+def _money(amount, currency: str) -> Money:
+    return Money(amount=f"{amount:.4f}", currency=currency)
+
+
+def _reorder_item(item: dict) -> ReorderItemOut:
+    order = item["order"]
+    listing = item["listing"]
+    return ReorderItemOut(
+        order_id=order.id,
+        order_number=order.order_number,
+        order_status=order.status,
+        product_code=order.product.product_code,
+        product_name=order.product.name,
+        supplier_user_id=order.supplier_user_id,
+        supplier_name=order.supplier.full_name,
+        organisation=order.supplier.organisation.name,
+        quantity=quantity_text(order.quantity),
+        uom=order.uom,
+        currency=order.currency,
+        previous_price=_money(order.agreed_unit_price, order.currency),
+        ordered_at=order.created_at,
+        available=item["available"],
+        unavailable_reason=item["reason"],
+        current_asking_price=_money(listing.asking_price, listing.currency) if listing else None,
+        current_benchmark=_money(item["benchmark"], order.currency) if item["benchmark"] is not None else None,
+    )
+
+
+@router.get("/reorder", response_model=list[ReorderItemOut])
+def list_reorders(db: DbSession, actor: Participant):
+    return [_reorder_item(item) for item in reorder.list_reorderable(db, actor)]
+
+
+@router.post("/{order_id}/reorder", response_model=ReorderOut, status_code=201)
+def start_reorder(order_id: uuid.UUID, body: ReorderIn, db: DbSession, actor: Participant):
+    result = reorder.start_reorder(
+        db, actor, order_id, quantity=body.quantity, destination_pin=body.destination_pin,
+    )
+    db.commit()
+    negotiation = result["negotiation"]
+    item = result["item"]
+    estimate = result["freight"]
+    if estimate is None:
+        freight_status = "not_requested"
+        freight_amount = None
+    elif estimate["freight"] is None:
+        freight_status = "on_request"
+        freight_amount = None
+    else:
+        freight_status = "estimated"
+        freight_amount = estimate["freight"]
+    order = item["order"]
+    return ReorderOut(
+        negotiation_id=negotiation.id,
+        negotiation_number=negotiation.negotiation_number,
+        quantity=quantity_text(negotiation.quantity),
+        uom=negotiation.uom,
+        offered_price=_money(negotiation.versions[0].offered_price, negotiation.currency),
+        previous_price=_money(order.agreed_unit_price, order.currency),
+        current_benchmark=_money(item["benchmark"], order.currency) if item["benchmark"] is not None else None,
+        destination_pin=result["destination_pin"],
+        freight_status=freight_status,
+        freight=_money(freight_amount, order.currency) if freight_amount is not None else None,
+        note="Opening offer is the current supplier asking price. The previous order price is not reused. Freight, when shown, is only an estimate.",
+    )
 
 
 @router.get("/{order_id}", response_model=OrderOut)

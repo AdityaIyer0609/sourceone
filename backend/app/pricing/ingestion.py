@@ -24,6 +24,7 @@ from app.core.errors import SourceInactive, ValidationFailed
 from app.models.pricing import BenchmarkRate, ImportBatch, RateSource, SourceRate
 from app.pricing import repository, service
 from app.pricing.constants import (
+    BENCHMARK_PRICE_FIELDS,
     ImportBatchStatus,
     ResolutionStatus,
     SUPPORTED_CURRENCIES,
@@ -51,6 +52,7 @@ class NormalizedRow:
     currency: str | None = None
     unit: str | None = None
     value: Decimal | None = None
+    benchmark_field: str | None = None
     price_basis: str | None = None
     tax_basis: str | None = None
     eligible: bool = False
@@ -144,15 +146,23 @@ def normalize_erp_row(row: Mapping[str, Any], profile: Mapping[str, Any]) -> Nor
         return normalized
     normalized.unit = unit
 
-    value = _decimal(row.get(profile["value_field"]))
+    benchmark_field = profile.get("benchmark_field")
+    if benchmark_field and benchmark_field not in BENCHMARK_PRICE_FIELDS:
+        normalized.error = "invalid_benchmark_field"
+        return normalized
+    value_field = benchmark_field or profile["value_field"]
+    normalized.benchmark_field = value_field
+    value = _decimal(row.get(value_field))
     if value is None or value <= 0:
         normalized.error = "invalid_value"
         return normalized
-    for other in profile.get("must_equal_fields", []):
-        other_value = _decimal(row.get(other))
-        if other_value is None or abs(other_value - value) > EQUALITY_TOLERANCE:
-            normalized.error = "price_fields_diverged"
-            return normalized
+    # A configured benchmark field is the only price used. The other three stay in the raw row.
+    if not benchmark_field:
+        for other in profile.get("must_equal_fields", []):
+            other_value = _decimal(row.get(other))
+            if other_value is None or abs(other_value - value) > EQUALITY_TOLERANCE:
+                normalized.error = "price_fields_diverged"
+                return normalized
     for component in profile.get("must_be_empty_fields", []):
         if not _is_empty_component(row.get(component)):
             normalized.error = "unexpected_components"
@@ -199,7 +209,11 @@ def _build_source_rate(
         unit=normalized.unit,
         price_basis=normalized.price_basis,
         tax_basis=normalized.tax_basis,
-        raw_payload={"row": _json_safe(row), "identitySignature": normalized.identity_signature},
+        raw_payload={
+            "row": _json_safe(row),
+            "identitySignature": normalized.identity_signature,
+            "benchmarkField": normalized.benchmark_field,
+        },
         normalization_profile_version=source.profile_version,
         resolution_status=ResolutionStatus.UNRESOLVED,
         is_benchmark_eligible=False,

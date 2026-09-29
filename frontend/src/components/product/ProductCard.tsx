@@ -17,9 +17,9 @@ export function ProductCard({ product, market, onOpen }: { product: Product; mar
       <div className="product-card__body">
         <div className="product-card__meta"><Badge>{titleCase(product.category)}</Badge><Button variant="ghost" className="icon-button" aria-label="Save item"><Heart size={17} /></Button></div>
         <Heading level={3}>{product.name}</Heading>
-        <p>SourceOne Benchmark</p>
+        <p>{product.productCode}{product.subcategory ? ` · ${product.subcategory}` : ""} · {product.uom.label}</p>
         <Price value={current?.value ?? null} uom={pricing?.unit.label ?? product.uom.label} change={pricing?.movement.state === "ok" ? pricing.movement.percent : null} />
-        <div className="product-card__foot"><span><span className="stock-dot" />{asOf}</span><span>{pricing?.market.label ?? product.subcategory}</span></div>
+        <div className="product-card__foot"><span><span className="stock-dot" />{product.availability === "available" ? asOf : "Rate on request"}</span><span>{product.listingCount} {product.listingCount === 1 ? "supplier" : "suppliers"}</span></div>
       </div>
     </article>
   );

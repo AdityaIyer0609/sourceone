@@ -13,7 +13,7 @@ from app.models.identity import Organisation, Role, User, UserRole
 from app.models.negotiation import Negotiation
 from app.negotiation import service
 from app.pricing import service as pricing_service
-from tests.test_api import _flatten, as_user
+from tests.test_api import _flatten, as_actor, as_user
 
 NEGOTIATIONS = "/api/v1/negotiations"
 
@@ -54,6 +54,20 @@ def _other_buyer(world):
     world.session.add(UserRole(user_id=user.id, role_id=role.id))
     world.session.flush()
     return user
+
+
+def test_buyer_can_list_and_choose_a_supplier(client, world, product):
+    listed = client.get(f"{NEGOTIATIONS}/suppliers", headers=as_user(world, "buyer"))
+    assert listed.status_code == 200, listed.text
+    supplier = world.users["supplier"]
+    assert {
+        "id": str(supplier.id), "name": supplier.full_name, "organisation": supplier.organisation.name,
+    } in listed.json()
+    assert str(world.users["buyer"].id) not in [row["id"] for row in listed.json()]
+    assert client.get(f"{NEGOTIATIONS}/suppliers", headers=as_user(world, "supplier")).status_code == 403
+    chosen = _start(client, world, product)
+    assert chosen.status_code == 201
+    assert chosen.json()["supplier"]["name"] == world.users["supplier"].full_name
 
 
 def test_create_negotiation_snapshots_benchmark(client, world, product):
@@ -97,8 +111,8 @@ def test_rate_on_request_product_snapshot(client, world):
 def test_access_control(client, world, product):
     negotiation_id = _start(client, world, product).json()["id"]
     other = _other_buyer(world)
-    assert client.get(f"{NEGOTIATIONS}/{negotiation_id}", headers={"X-Demo-User": other.email}).status_code == 404
-    assert negotiation_id not in [n["id"] for n in client.get(NEGOTIATIONS, headers={"X-Demo-User": other.email}).json()]
+    assert client.get(f"{NEGOTIATIONS}/{negotiation_id}", headers=as_actor(other)).status_code == 404
+    assert negotiation_id not in [n["id"] for n in client.get(NEGOTIATIONS, headers=as_actor(other)).json()]
     supplier_view = client.get(f"{NEGOTIATIONS}/{negotiation_id}", headers=as_user(world, "supplier"))
     assert supplier_view.status_code == 200 and supplier_view.json()["viewerRole"] == "supplier"
     assert negotiation_id in [n["id"] for n in client.get(NEGOTIATIONS, headers=as_user(world, "supplier")).json()]

@@ -12,11 +12,13 @@ export interface Product {
   priceKind: 'sourceone_benchmark'
   priceLabel: 'SourceOne benchmark'
   availability: Availability
+  listingCount: number
   defaultSeriesCode: string | null
   pricing: BenchmarkSummary[]
+  specifications: { key: string; label: string; value: string | null }[]
 }
 
-export const listProducts = (query: { category?: string } = {}, signal?: AbortSignal) =>
+export const listProducts = (query: { category?: string; q?: string } = {}, signal?: AbortSignal) =>
   apiClient.get<Product[]>('/products', { query, signal })
 
 export const getProduct = (productCode: string, signal?: AbortSignal) =>

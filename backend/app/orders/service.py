@@ -92,6 +92,8 @@ def create_from_negotiation(
     session.add(order)
     session.flush()
     _record_event(session, order, None, actor, note=None, now=now)
+    from app.purchase_requests.service import mark_converted
+    mark_converted(session, negotiation.id)
     return order
 
 

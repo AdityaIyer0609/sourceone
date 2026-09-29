@@ -3,6 +3,9 @@
 .env.*
 !.env.example
 
+# SourceOne product files
+backend/var/
+
 # Python
 __pycache__/
 *.py[cod]

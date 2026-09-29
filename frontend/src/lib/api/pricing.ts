@@ -119,6 +119,8 @@ export interface RateSource {
   stalenessDays: number
   publishingPolicy: string
   profileVersion: number
+  /** Set for an ERP price source: the DomesticPrice1 column used as the benchmark value. */
+  benchmarkPriceField: 'GrandTotal' | 'Total' | 'Basic' | 'UnitPrice' | null
 }
 
 export interface SourceRate {
@@ -253,7 +255,12 @@ export interface EditBenchmarkInput {
 
 const ADMIN = '/admin/pricing'
 
+export const BENCHMARK_PRICE_FIELDS = ['GrandTotal', 'Total', 'Basic', 'UnitPrice'] as const
+
 export const listRateSources = (signal?: AbortSignal) => apiClient.get<RateSource[]>(`${ADMIN}/sources`, { signal })
+
+export const setBenchmarkPriceField = (sourceId: string, benchmarkPriceField: RateSource['benchmarkPriceField']) =>
+  apiClient.patch<RateSource>(`${ADMIN}/sources/${sourceId}/benchmark-field`, { benchmarkPriceField })
 
 export const listSourceRates = (
   query: { seriesId?: string; batchId?: string; resolutionStatus?: string; sector?: string; eligible?: boolean; limit?: number; offset?: number } = {},
@@ -284,3 +291,10 @@ export const publishBenchmark = (id: string) => apiClient.post<BenchmarkAdmin>(`
 export const rejectBenchmark = (id: string, reason: string) => apiClient.post<BenchmarkAdmin>(`${ADMIN}/benchmarks/${id}/reject`, { reason })
 
 export const withdrawBenchmark = (id: string, reason: string) => apiClient.post<BenchmarkAdmin>(`${ADMIN}/benchmarks/${id}/withdraw`, { reason })
+
+export interface ErpSyncResult {
+  status: string
+  prices: { imported: number; benchmarksPublished: number }
+}
+
+export const syncErp = () => apiClient.post<ErpSyncResult>('/admin/integrations/erp/sync')

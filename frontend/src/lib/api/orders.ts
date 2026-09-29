@@ -77,3 +77,44 @@ export const createOrderFromNegotiation = (negotiationId: string) =>
   apiClient.post<Order>(`${BASE}/from-negotiation/${negotiationId}`)
 
 export const cancelOrder = (id: string, reason?: string) => apiClient.post<Order>(`${BASE}/${id}/cancel`, { reason })
+
+export type ReorderBlock = 'cancelled' | 'inactive_product' | 'inactive_supplier' | 'no_listing'
+
+export interface ReorderItem {
+  orderId: string
+  orderNumber: string
+  orderStatus: OrderStatus
+  productCode: string
+  productName: string
+  supplierUserId: string
+  supplierName: string
+  organisation: string
+  quantity: string
+  uom: string
+  currency: string
+  previousPrice: Money
+  orderedAt: string
+  available: boolean
+  unavailableReason: ReorderBlock | null
+  currentAskingPrice: Money | null
+  currentBenchmark: Money | null
+}
+
+export interface ReorderResult {
+  negotiationId: string
+  negotiationNumber: string
+  quantity: string
+  uom: string
+  offeredPrice: Money
+  previousPrice: Money
+  currentBenchmark: Money | null
+  destinationPin: string | null
+  freightStatus: 'estimated' | 'on_request' | 'not_requested'
+  freight: Money | null
+  note: string
+}
+
+export const listReorders = (signal?: AbortSignal) => apiClient.get<ReorderItem[]>(`${BASE}/reorder`, { signal })
+
+export const startReorder = (orderId: string, body: { quantity: string; destinationPin?: string }) =>
+  apiClient.post<ReorderResult>(`${BASE}/${orderId}/reorder`, body)

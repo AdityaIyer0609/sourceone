@@ -57,16 +57,28 @@ export interface OfferInput {
   message?: string
 }
 
+export interface NegotiationSupplier {
+  id: string
+  name: string
+  organisation: string
+  askingPrice?: string
+  minimumQuantity?: string
+  availability?: string
+}
+
 export interface StartNegotiationInput extends OfferInput {
   productCode: string
   seriesCode?: string
   quantity: string
   currency?: string
+  supplierUserId?: string
 }
 
 const BASE = '/negotiations'
 
 export const listNegotiations = (signal?: AbortSignal) => apiClient.get<Negotiation[]>(BASE, { signal })
+
+export const listSuppliers = (signal?: AbortSignal) => apiClient.get<NegotiationSupplier[]>(`${BASE}/suppliers`, { signal })
 
 export const getNegotiation = (id: string, signal?: AbortSignal) => apiClient.get<Negotiation>(`${BASE}/${id}`, { signal })
 

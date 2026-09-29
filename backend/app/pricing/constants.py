@@ -80,6 +80,10 @@ class SeriesVisibility(StrEnum):
 SUPPORTED_CURRENCIES = ("INR", "USD")
 SUPPORTED_UNITS = ("KG",)
 
+# DomesticPrice1 columns an admin can choose as the benchmark value. Only one is active.
+BENCHMARK_PRICE_FIELDS = ("GrandTotal", "Total", "Basic", "UnitPrice")
+DEFAULT_BENCHMARK_PRICE_FIELD = "GrandTotal"
+
 PRICE_BASIS_LABELS = {
     "DELIVERED": "Delivered",
     "EX_WORKS": "Ex-works",

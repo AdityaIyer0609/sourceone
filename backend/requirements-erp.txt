@@ -1,0 +1,3 @@
+# Optional: only needed when ERP_ENABLED=true (read-only SQL Server access). Also requires the
+# Microsoft ODBC Driver for SQL Server to be installed on the host.
+pyodbc==5.2.0

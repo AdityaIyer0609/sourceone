@@ -14,7 +14,7 @@ from app.negotiation import service as negotiations
 from app.orders import service
 from app.orders.constants import OrderStatus
 from app.pricing import service as pricing_service
-from tests.test_api import _flatten, as_user
+from tests.test_api import _flatten, as_actor, as_user
 from tests.test_negotiations import _other_buyer, _publish
 
 ORDERS = "/api/v1/orders"
@@ -117,12 +117,12 @@ def test_access_control(client, world, product):
     negotiation = _negotiation(world, product)
     assert _place(client, world, negotiation, key="supplier").status_code == 403
     other = _other_buyer(world)
-    stranger = client.post(f"{ORDERS}/from-negotiation/{negotiation.id}", headers={"X-Demo-User": other.email})
+    stranger = client.post(f"{ORDERS}/from-negotiation/{negotiation.id}", headers=as_actor(other))
     assert stranger.status_code == 404
 
     order = _place(client, world, negotiation).json()
-    assert client.get(f"{ORDERS}/{order['id']}", headers={"X-Demo-User": other.email}).status_code == 404
-    assert order["id"] not in [o["id"] for o in client.get(ORDERS, headers={"X-Demo-User": other.email}).json()]
+    assert client.get(f"{ORDERS}/{order['id']}", headers=as_actor(other)).status_code == 404
+    assert order["id"] not in [o["id"] for o in client.get(ORDERS, headers=as_actor(other)).json()]
     supplier = client.get(f"{ORDERS}/{order['id']}", headers=as_user(world, "supplier"))
     assert supplier.status_code == 200 and supplier.json()["viewerRole"] == "supplier"
     assert order["id"] in [o["id"] for o in client.get(ORDERS, headers=as_user(world, "supplier")).json()]

@@ -1,5 +1,6 @@
 import uuid
 from datetime import datetime
+from decimal import Decimal
 from typing import Literal
 
 from pydantic import Field
@@ -98,3 +99,42 @@ class StatusChangeIn(ApiModel):
 
 class CancelOrderIn(ApiModel):
     reason: str | None = Field(default=None, max_length=2000)
+
+
+class ReorderItemOut(ApiModel):
+    order_id: uuid.UUID
+    order_number: str
+    order_status: OrderStatusName
+    product_code: str
+    product_name: str
+    supplier_user_id: uuid.UUID
+    supplier_name: str
+    organisation: str
+    quantity: str
+    uom: str
+    currency: str
+    previous_price: Money
+    ordered_at: datetime
+    available: bool
+    unavailable_reason: Literal["cancelled", "inactive_product", "inactive_supplier", "no_listing"] | None
+    current_asking_price: Money | None
+    current_benchmark: Money | None
+
+
+class ReorderIn(ApiModel):
+    quantity: Decimal = Field(gt=0, max_digits=18, decimal_places=3)
+    destination_pin: str | None = Field(default=None, min_length=6, max_length=6)
+
+
+class ReorderOut(ApiModel):
+    negotiation_id: uuid.UUID
+    negotiation_number: str
+    quantity: str
+    uom: str
+    offered_price: Money
+    previous_price: Money
+    current_benchmark: Money | None
+    destination_pin: str | None
+    freight_status: Literal["estimated", "on_request", "not_requested"]
+    freight: Money | None
+    note: str

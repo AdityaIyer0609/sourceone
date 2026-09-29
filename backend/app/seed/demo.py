@@ -18,9 +18,13 @@ from sqlalchemy.orm import Session
 from app.catalogue import products
 from app.catalogue.resolver import normalize_text
 from app.core.clock import business_today, start_of_business_day, utcnow
+from app.core.config import get_settings
 from app.db.session import SessionLocal
+from app.identity.passwords import hash_password
 from app.identity.service import actor_for
-from app.models.catalogue import Grade, GradeEquivalence, Market, MarketAlias, Producer, ProducerGradeAlias
+from app.models.catalogue import Grade, GradeEquivalence, Market, MarketAlias, Producer, ProducerGradeAlias, Product
+from app.models.freight import FreightRule
+from app.models.listing import SupplierListing
 from app.models.identity import Organisation, Role, User, UserRole
 from app.models.pricing import RateSeries, RateSource, SourceRate
 from app.negotiation import service as negotiation_service
@@ -33,7 +37,7 @@ ERP_SOURCE_CODE = "ERP-DOMESTICPRICE1-DEMO"
 DEMO_NOTE = "DEMO FIXTURE: synthetic rows shaped like ERP DomesticPrice1; not from a live ERP connection."
 
 DEMO_TABLES = (
-    "order_status_events", "orders", "negotiation_versions", "negotiations", "product_rate_series", "products", "pricing_audit_events", "benchmark_rate_inputs", "benchmark_rates", "source_rates", "import_batches",
+    "product_answers", "product_questions", "product_documents", "purchase_request_suppliers", "purchase_requests", "freight_rules", "supplier_listings", "erp_price_row_imports", "erp_grades", "erp_customers", "erp_sync_runs", "order_status_events", "orders", "negotiation_versions", "negotiations", "product_rate_series", "products", "pricing_audit_events", "benchmark_rate_inputs", "benchmark_rates", "source_rates", "import_batches",
     "rate_series", "rate_sources", "market_aliases", "grade_equivalence", "producer_grade_aliases",
     "markets", "grades", "producers", "user_roles", "users", "organisations",
 )
@@ -156,18 +160,60 @@ PRODUCTS = [
      "Imported raffia-grade PP, quoted at the Middle East origin region.",
      ["PP-RAFFIA-MIDDLE-EAST-USD"]),
 ]
+# SourceOne catalogue specifications for the demo products. Not read from ERP.
+PRODUCT_SPECS = {
+    "PP-RAFFIA-A": {"grade": "PP Raffia", "application": "Raffia", "quality": "Prime", "mfi": "3.0 g/10 min", "density": "0.900 g/cm3"},
+    "PP-RAFFIA-B": {"grade": "PP Raffia", "application": "Raffia", "quality": "Off-grade"},
+    "PP-MULTIFIL-A": {"grade": "PP Multifilament", "application": "Multifilament", "quality": "Prime", "mfi": "12 g/10 min", "density": "0.905 g/cm3"},
+    "LDPE-LAM-A": {"grade": "LDPE Lamination", "application": "Lamination", "quality": "Prime", "mfi": "4 g/10 min", "density": "0.923 g/cm3"},
+    "LLDPE-LINER-A": {"grade": "LLDPE Liner", "application": "Liner", "quality": "Prime", "mfi": "1.0 g/10 min", "density": "0.918 g/cm3"},
+    "PP-RAFFIA-IMP-A": {"grade": "PP Raffia", "producer": "Borouge", "application": "Raffia", "quality": "Prime", "mfi": "3.0 g/10 min", "density": "0.900 g/cm3"},
+}
+# Development password for the seeded sign-in accounts. Not a production secret.
+DEMO_PASSWORD = "SourceOne-demo"
+# email, seed key, name, organisation, role, system account
 USERS = [
-    ("system@sourceone.local", "SourceOne System", "SOURCEONE", None, True),
-    ("asha@sourceone.demo", "Asha Mehta", "SOURCEONE", "platform_admin", False),
-    ("ravi@sourceone.demo", "Ravi Iyer", "SOURCEONE", "pricing_admin", False),
-    ("meera@sourceone.demo", "Meera Shah", "SOURCEONE", "pricing_admin", False),
-    ("buyer@ardent.demo", "Arjun Patel", "ARDENT", "buyer", False),
-    ("supplier@zenith.demo", "Zoya Khan", "ZENITH", "supplier", False),
+    ("system@sourceone.local", "system", "SourceOne System", "SOURCEONE", None, True),
+    ("admin@demo.sourceone", "asha", "Asha Mehta", "SOURCEONE", "platform_admin", False),
+    ("pricing@demo.sourceone", "ravi", "Ravi Iyer", "SOURCEONE", "pricing_admin", False),
+    ("meera@sourceone.demo", "meera", "Meera Shah", "SOURCEONE", "pricing_admin", False),
+    ("buyer@demo.sourceone", "buyer", "Arjun Patel", "ARDENT", "buyer", False),
+    ("supplier@demo.sourceone", "supplier", "Zoya Khan", "ZENITH", "supplier", False),
+    ("neil@harbour.demo", "neil", "Neil Desai", "HARBOUR", "supplier", False),
 ]
+# Existing demo rows keep their user id; only the sign-in email changes.
+LOGIN_EMAILS = {
+    "asha@sourceone.demo": "admin@demo.sourceone",
+    "ravi@sourceone.demo": "pricing@demo.sourceone",
+    "buyer@ardent.demo": "buyer@demo.sourceone",
+    "supplier@zenith.demo": "supplier@demo.sourceone",
+}
 ORGANISATIONS = [
     ("SOURCEONE", "SourceOne", "platform"),
     ("ARDENT", "Ardent Packaging (demo buyer)", "buyer"),
     ("ZENITH", "Zenith Polymers (demo supplier)", "supplier"),
+    ("HARBOUR", "Harbour Polytrade (demo supplier)", "supplier"),
+]
+# Asking prices are the supplier's own offers. They are not ERP prices and not SourceOne benchmarks.
+LISTINGS = [
+    ("supplier", "PP-RAFFIA-A", "500", "100.2500", "INR", "in_stock", True),
+    ("neil", "PP-RAFFIA-A", "1000", "101.4000", "INR", "limited", True),
+    ("supplier", "PP-MULTIFIL-A", "500", "104.7500", "INR", "in_stock", True),
+    ("supplier", "LDPE-LAM-A", "250", "114.0000", "INR", "on_request", True),
+    ("supplier", "PP-RAFFIA-B", "500", "98.0000", "INR", "in_stock", False),
+]
+# SourceOne-owned lanes. These are not ERP freight rates.
+DISPATCH = {
+    "ZENITH": ("361140", "Jamnagar"),
+    "HARBOUR": ("394510", "Hazira"),
+}
+# origin pin, origin label, destination pin, destination label, ₹ or $ per kg, currency, minimum, active, from
+FREIGHT_RULES = [
+    ("361140", "Jamnagar", "390020", "Vadodara", "1.2500", "INR", "1500", True, date(2026, 1, 1)),
+    ("361140", "Jamnagar", "380015", "Ahmedabad", "1.1000", "INR", "1200", True, date(2026, 1, 1)),
+    ("394510", "Hazira", "390020", "Vadodara", "1.8000", "INR", "2000", True, date(2026, 1, 1)),
+    ("361140", "Jamnagar", "370201", "Gandhidham", "0.9000", "INR", None, False, date(2026, 1, 1)),
+    ("361140", "Jamnagar", "390020", "Vadodara", "0.0200", "USD", None, True, date(2026, 1, 1)),
 ]
 
 
@@ -198,13 +244,16 @@ def _reference_data(session: Session) -> dict:
 
     roles = {r.code: r for r in session.scalars(select(Role))}
     users = {}
-    for email, name, org, role, is_system in USERS:
-        user = User(email=email, full_name=name, organisation_id=orgs[org].id, is_system=is_system)
+    for email, key, name, org, role, is_system in USERS:
+        user = User(
+            email=email, full_name=name, organisation_id=orgs[org].id, is_system=is_system,
+            password_hash=None if is_system else hash_password(DEMO_PASSWORD),
+        )
         session.add(user)
         session.flush()
         if role:
             session.add(UserRole(user_id=user.id, role_id=roles[role].id))
-        users[email.split("@")[0]] = user
+        users[key] = user
 
     producers = {code: Producer(code=code, name=name) for code, name in PRODUCERS}
     grades = {
@@ -240,6 +289,16 @@ def _reference_data(session: Session) -> dict:
             description="Demo source shaped like ERP DomesticPrice1. Rows are fixtures; no ERP connection exists.",
         ),
         RateSource(
+            code=get_settings().erp_rate_source_code, name="ERP price list (read-only sync)",
+            source_type=SourceType.ERP_FEED, is_active=True, priority=10, staleness_days=14,
+            publishing_policy=PublishingPolicy.REVIEW_REQUIRED, default_unit="KG",
+            normalization_profile={
+                **ERP_PROFILE, "benchmark_field": "GrandTotal", "value_field": "GrandTotal", "must_equal_fields": [],
+            },
+            profile_version=1, owner_organisation_id=orgs["SOURCEONE"].id,
+            description="Rows read from ERP DomesticPrice1 by the admin ERP sync. Empty until an ERP sync runs.",
+        ),
+        RateSource(
             code=service.MANUAL_SOURCE_CODE, name="SourceOne manual entry", source_type=SourceType.MANUAL,
             is_active=True, priority=20, staleness_days=7, publishing_policy=PublishingPolicy.REVIEW_REQUIRED,
             default_unit="KG", owner_organisation_id=orgs["SOURCEONE"].id,
@@ -260,9 +319,18 @@ def _reference_data(session: Session) -> dict:
         product = products.create_product(
             session, product_code=code, name=name, category=category, subcategory=subcategory,
             description=f"{DEMO_PRODUCT_NOTE} {description}", uom="KG",
+            specifications=PRODUCT_SPECS.get(code),
         )
         for order, series_code in enumerate(series_codes):
             products.map_rate_series(session, product, series[series_code], display_order=(order + 1) * 10)
+    catalogue = {code: session.scalar(select(Product).where(Product.product_code == code)) for code, *_ in PRODUCTS}
+    for user_key, product_code, minimum, price, currency, availability, active in LISTINGS:
+        session.add(SupplierListing(
+            supplier_user_id=users[user_key].id, product_id=catalogue[product_code].id, uom="KG",
+            minimum_quantity=Decimal(minimum), asking_price=Decimal(price), currency=currency,
+            availability=availability, is_active=active,
+        ))
+    ensure_demo_freight(session)
     return {"users": users, "series": series}
 
 
@@ -439,6 +507,104 @@ def _negotiations(session: Session, users: dict) -> None:
         at += STEP
 
 
+def ensure_demo_freight(session: Session) -> int:
+    """Add SourceOne freight lanes for the demo suppliers. Does not read ERP freight."""
+    for code, (pin, label) in DISPATCH.items():
+        org = session.scalar(select(Organisation).where(Organisation.code == code))
+        if org is None:
+            continue
+        org.dispatch_pin = pin
+        org.dispatch_label = label
+    added = 0
+    for origin_pin, origin_label, destination_pin, destination_label, rate, currency, minimum, active, effective_from in FREIGHT_RULES:
+        exists = session.scalar(select(FreightRule.id).where(
+            FreightRule.origin_pin == origin_pin,
+            FreightRule.destination_pin == destination_pin,
+            FreightRule.currency == currency,
+            FreightRule.is_active.is_(active),
+        ))
+        if exists is not None:
+            continue
+        session.add(FreightRule(
+            origin_pin=origin_pin, origin_label=origin_label,
+            destination_pin=destination_pin, destination_label=destination_label,
+            rate_per_kg=Decimal(rate), rate_unit="KG", currency=currency,
+            minimum_freight=Decimal(minimum) if minimum else None,
+            is_active=active, effective_from=effective_from, effective_to=None,
+        ))
+        added += 1
+    return added
+
+
+def ensure_demo_specifications(session: Session) -> int:
+    """Fill demo catalogue specs only where a product has none yet."""
+    updated = 0
+    for code, specs in PRODUCT_SPECS.items():
+        product = session.scalar(select(Product).where(Product.product_code == code))
+        if product is None or product.specifications:
+            continue
+        product.specifications = specs
+        updated += 1
+    return updated
+
+
+def ensure_demo_accounts(session: Session) -> int:
+    """Point the four sign-in accounts at the existing demo users and set the development password."""
+    password = hash_password(DEMO_PASSWORD)
+    updated = 0
+    for old, new in LOGIN_EMAILS.items():
+        current = session.scalar(select(User).where(User.email == new))
+        legacy = session.scalar(select(User).where(User.email == old))
+        if current is None and legacy is not None:
+            legacy.email = new
+            current = legacy
+        if current is None or current.is_system:
+            continue
+        current.password_hash = password
+        updated += 1
+    return updated
+
+
+def ensure_demo_listings(session: Session) -> int:
+    """Add the demo supplier catalogue when reference data already exists."""
+    org = session.scalar(select(Organisation).where(Organisation.code == "HARBOUR"))
+    if org is None:
+        org = Organisation(code="HARBOUR", name="Harbour Polytrade (demo supplier)", org_type="supplier")
+        session.add(org)
+        session.flush()
+    user = session.scalar(select(User).where(User.email == "neil@harbour.demo"))
+    if user is None:
+        user = User(email="neil@harbour.demo", full_name="Neil Desai", organisation_id=org.id, is_system=False)
+        session.add(user)
+        session.flush()
+        role = session.scalar(select(Role).where(Role.code == "supplier"))
+        session.add(UserRole(user_id=user.id, role_id=role.id))
+    users = {
+        "supplier": session.scalar(select(User).where(User.email == "supplier@demo.sourceone")),
+        "neil": user,
+    }
+    if users["supplier"] is None:
+        return 0
+    added = 0
+    for user_key, product_code, minimum, price, currency, availability, active in LISTINGS:
+        product = session.scalar(select(Product).where(Product.product_code == product_code))
+        if product is None:
+            continue
+        exists = session.scalar(select(SupplierListing.id).where(
+            SupplierListing.supplier_user_id == users[user_key].id,
+            SupplierListing.product_id == product.id,
+        ))
+        if exists is not None:
+            continue
+        session.add(SupplierListing(
+            supplier_user_id=users[user_key].id, product_id=product.id, uom="KG",
+            minimum_quantity=Decimal(minimum), asking_price=Decimal(price), currency=currency,
+            availability=availability, is_active=active,
+        ))
+        added += 1
+    return added
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Seed SourceOne pricing demo data")
     parser.add_argument("--reset", action="store_true", help="truncate demo tables first (keeps roles/permissions)")
@@ -447,8 +613,15 @@ def main() -> int:
         if args.reset:
             _reset(session)
         elif session.scalar(select(Organisation.id).limit(1)) is not None:
-            print("Demo data already present; re-run with --reset to rebuild it.")
-            return 1
+            accounts = ensure_demo_accounts(session)
+            added = ensure_demo_listings(session)
+            freight = ensure_demo_freight(session)
+            specs = ensure_demo_specifications(session)
+            session.commit()
+            total = session.scalar(text("SELECT count(*) FROM supplier_listings"))
+            lanes = session.scalar(text("SELECT count(*) FROM freight_rules"))
+            print(f"Demo data already present. Sign-in accounts updated: {accounts}. Supplier listings added: {added}. supplier_listings: {total}. Freight rules added: {freight}. freight_rules: {lanes}. Specifications filled: {specs}")
+            return 0
         summary = seed(session)
         session.commit()
         counts = {
@@ -456,7 +629,7 @@ def main() -> int:
             for table in ("users", "producers", "grades", "markets", "rate_series", "import_batches",
                           "source_rates", "benchmark_rates", "pricing_audit_events", "products",
                           "product_rate_series", "negotiations", "negotiation_versions", "orders",
-                          "order_status_events")
+                          "order_status_events", "supplier_listings", "freight_rules")
         }
     print(f"Seeded {summary['batches']} demo ERP batches (fixtures, no ERP connection).")
     for table, count in counts.items():

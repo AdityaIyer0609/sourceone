@@ -20,7 +20,12 @@ def _flatten(payload, keys=None, values=None):
 
 
 def as_user(world, key):
-    return {"X-Demo-User": world.users[key].email}
+    return as_actor(world.users[key])
+
+
+def as_actor(user):
+    from app.identity.tokens import issue_token
+    return {"Authorization": f"Bearer {issue_token(user.id)}"}
 
 
 def _ingest_recent(world, value="99.40", days_ago=3):

@@ -90,6 +90,14 @@ def create_negotiation(body: schemas.CreateNegotiationIn, db: DbSession, actor: 
     return _present(actor, service.get_negotiation(db, actor, negotiation.id))
 
 
+@router.get("/suppliers", response_model=list[schemas.SupplierOptionOut])
+def list_suppliers(db: DbSession, actor: Participant):
+    return [
+        schemas.SupplierOptionOut(id=user.id, name=user.full_name, organisation=user.organisation.name)
+        for user in service.list_suppliers(db, actor)
+    ]
+
+
 @router.get("", response_model=list[schemas.NegotiationOut])
 def list_negotiations(db: DbSession, actor: Participant, status: NegotiationStatus | None = None):
     return [_present(actor, n) for n in service.list_negotiations(db, actor, status=status)]

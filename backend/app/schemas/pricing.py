@@ -96,6 +96,12 @@ class BenchmarkSummaryOut(ApiModel):
     sparkline: SparklineOut
 
 
+class SpecificationOut(ApiModel):
+    key: str
+    label: str
+    value: str | None
+
+
 class ProductOut(ApiModel):
     """Buyer catalogue product. Prices come only from the mapped SourceOne benchmark series."""
 
@@ -108,8 +114,10 @@ class ProductOut(ApiModel):
     price_kind: Literal["sourceone_benchmark"] = "sourceone_benchmark"
     price_label: Literal["SourceOne benchmark"] = "SourceOne benchmark"
     availability: Literal["available", "rate_on_request"]
+    listing_count: int
     default_series_code: str | None
     pricing: list[BenchmarkSummaryOut]
+    specifications: list[SpecificationOut]
 
 
 class HistoryOut(ApiModel):
@@ -141,6 +149,10 @@ class EstimateOut(ApiModel):
 # --- Admin contracts -----------------------------------------------------------------------
 
 
+class BenchmarkFieldIn(ApiModel):
+    benchmark_price_field: Literal["GrandTotal", "Total", "Basic", "UnitPrice"]
+
+
 class RateSourceOut(ApiModel):
     id: uuid.UUID
     code: str
@@ -151,6 +163,7 @@ class RateSourceOut(ApiModel):
     staleness_days: int
     publishing_policy: str
     profile_version: int
+    benchmark_price_field: str | None = None
 
 
 class RefOut(ApiModel):

@@ -12,14 +12,15 @@ export function AppShell() {
   const matches = useMatches();
 
   const title = matches.map((match) => (match.handle as RouteHandle | undefined)?.title).filter(Boolean).at(-1) ?? "";
-  const onCatalogue = pathname === paths.catalogue;
-  const search = onCatalogue ? searchParams.get("q") ?? "" : "";
+  const searchable = pathname === paths.marketplace || pathname === paths.catalogue;
+  const search = searchable ? searchParams.get("q") ?? "" : "";
 
   const handleSearch = (value: string) => {
-    if (!value && !onCatalogue) return;
+    if (!value && !searchable) return;
+    const stay = searchable;
     navigate(
-      { pathname: paths.catalogue, search: value ? `?${new URLSearchParams({ q: value })}` : "" },
-      { replace: onCatalogue },
+      { pathname: stay ? pathname : paths.catalogue, search: value ? `?${new URLSearchParams({ q: value })}` : "" },
+      { replace: stay },
     );
   };
 

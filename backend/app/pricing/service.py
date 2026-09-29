@@ -11,6 +11,7 @@ from typing import Any
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import flag_modified
 
 from app.core.clock import start_of_business_day, utcnow
 from app.core.errors import (
@@ -39,6 +40,7 @@ from app.models.pricing import (
 from app.pricing import repository
 from app.pricing.constants import (
     BENCHMARK_TRANSITIONS,
+    BENCHMARK_PRICE_FIELDS,
     BenchmarkMethod,
     BenchmarkOrigin,
     BenchmarkStatus,
@@ -239,6 +241,37 @@ def create_system_suggestion(
         to_status=BenchmarkStatus.SUBMITTED, changes={"sourceRateId": str(source_rate.id)},
     )
     return benchmark
+
+
+def benchmark_price_field(source: RateSource) -> str | None:
+    if source.source_type != SourceType.ERP_FEED:
+        return None
+    profile = source.normalization_profile or {}
+    return profile.get("benchmark_field") or profile.get("value_field")
+
+
+def set_benchmark_price_field(session: Session, actor: Actor, source_id: uuid.UUID, field: str) -> RateSource:
+    """Choose which DomesticPrice1 column incoming ERP rows use. Does not publish anything."""
+    actor.require(PricingPermission.CONFIGURE)
+    if field not in BENCHMARK_PRICE_FIELDS:
+        raise ValidationFailed("Choose GrandTotal, Total, Basic or UnitPrice", details={"field": field})
+    source = session.get(RateSource, source_id)
+    if source is None or source.source_type != SourceType.ERP_FEED:
+        raise ValidationFailed("Benchmark field applies only to an ERP price source", details={"sourceId": str(source_id)})
+    profile = dict(source.normalization_profile or {})
+    previous = profile.get("benchmark_field") or profile.get("value_field")
+    profile["benchmark_field"] = field
+    profile["value_field"] = field
+    profile["must_equal_fields"] = []
+    source.normalization_profile = profile
+    flag_modified(source, "normalization_profile")
+    source.profile_version += 1
+    _record(
+        session, entity_id=source.id, entity_type="rate_source", action="benchmark_field_set",
+        actor_id=actor.user_id, now=utcnow(), changes={"from": previous, "to": field},
+    )
+    session.flush()
+    return source
 
 
 def select_source_rate(

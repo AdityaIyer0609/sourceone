@@ -1,7 +1,8 @@
 import uuid
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import CheckConstraint, ForeignKey, Integer, String, Text, UniqueConstraint, true
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, Timestamps, UUIDPrimaryKey
@@ -92,6 +93,8 @@ class Product(UUIDPrimaryKey, Timestamps, Base):
     description: Mapped[str | None] = mapped_column(Text)
     uom: Mapped[str] = mapped_column(String(16))
     is_active: Mapped[bool] = mapped_column(default=True, server_default=true())
+    # SourceOne catalogue attributes. Not copied from ERP. Missing keys mean "not specified".
+    specifications: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
 
     series_links: Mapped[list["ProductRateSeries"]] = relationship(
         back_populates="product", order_by="ProductRateSeries.display_order"
