@@ -6,7 +6,7 @@ import { paths } from "../../app/paths";
 import { AsyncContent } from "../../components/feedback/AsyncContent";
 import { Badge, Button, Input, Modal } from "../../components/ui";
 import { getErrorMessage } from "../../lib/api/client";
-import { estimateFreight, type FreightEstimate } from "../../lib/api/freight";
+import { estimateFreight, shownFreight, type FreightBasis, type FreightEstimate } from "../../lib/api/freight";
 import { listReorders, startReorder, type ReorderItem } from "../../lib/api/orders";
 import { useApiQuery } from "../../lib/api/useApiQuery";
 import { formatDate, formatMoney, titleCase } from "../../lib/pricingFormat";
@@ -28,6 +28,7 @@ function ReorderModal({ item, onClose }: { item: ReorderItem; onClose: () => voi
   const [pin, setPin] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [basis, setBasis] = useState<FreightBasis>("standard");
   const pinOk = /^[1-9][0-9]{5}$/.test(pin);
   const quantityOk = Number(quantity) > 0;
   const estimate = useApiQuery(
@@ -44,7 +45,8 @@ function ReorderModal({ item, onClose }: { item: ReorderItem; onClose: () => voi
     if (!pinOk) return "PIN must be 6 digits";
     if (estimate.error) return getErrorMessage(estimate.error);
     if (!value) return "…";
-    return value.freightStatus === "estimated" && value.freight ? formatMoney(value.freight) : "Freight on request";
+    const shown = shownFreight(value, basis);
+    return shown.status === "estimated" && shown.freight ? formatMoney(shown.freight) : "Freight on request";
   };
   const submit = async () => {
     setBusy(true);
@@ -67,9 +69,15 @@ function ReorderModal({ item, onClose }: { item: ReorderItem; onClose: () => voi
         <span><small>Supplier</small><strong>{item.organisation} · {item.supplierName}</strong></span>
         <span><small>Previous final price</small><strong>{formatMoney(item.previousPrice, 4)} / {item.uom.toLowerCase()}</strong></span>
         <span><small>Current asking price</small><strong>{item.currentAskingPrice ? `${formatMoney(item.currentAskingPrice, 4)} / ${item.uom.toLowerCase()}` : "—"}</strong></span>
-        <span><small>SourceOne benchmark</small><strong>{item.currentBenchmark ? formatMoney(item.currentBenchmark, 4) : "Rate on request"}</strong></span>
-        <span><small>Estimated freight</small><strong>{freightText(estimate.data)}</strong></span>
+        <span><small>Plenza benchmark</small><strong>{item.currentBenchmark ? formatMoney(item.currentBenchmark, 4) : "Rate on request"}</strong></span>
+        <span><small>{estimate.data ? shownFreight(estimate.data, basis).label ?? "Estimated freight" : "Estimated freight"}</small><strong>{freightText(estimate.data)}</strong></span>
       </div>
+      {estimate.data && (
+        <div className="chip-row" role="group" aria-label="Freight basis">
+          <Button variant="ghost" className={`filter-chip${basis === "standard" ? " is-active" : ""}`} onClick={() => setBasis("standard")}>Normal freight</Button>
+          <Button variant="ghost" className={`filter-chip${basis === "distance" ? " is-active" : ""}`} onClick={() => setBasis("distance")}>Road distance</Button>
+        </div>
+      )}
       <div className="form-grid">
         <label>Quantity<div className="input-combo"><Input value={quantity} onChange={(event) => setQuantity(event.target.value)} /><span>{item.uom}</span></div></label>
         <label>Delivery PIN<Input value={pin} placeholder="Change destination" onChange={(event) => setPin(event.target.value)} /></label>
@@ -106,7 +114,7 @@ export function ReorderWorkspace() {
           ["REORDERABLE", count((item) => item.available), "Ready to negotiate again"],
           ["UNAVAILABLE", count((item) => !item.available && item.unavailableReason !== "cancelled"), "Product or supplier inactive"],
           ["CANCELLED", count((item) => item.unavailableReason === "cancelled"), "Not reordered"],
-          ["PAST ORDERS", items.length, "Your SourceOne orders"],
+          ["PAST ORDERS", items.length, "Your Plenza orders"],
         ].map(([label, value, note]) => <div key={label}><small>{label}</small><strong>{String(value).padStart(2, "0")}</strong><span>{note}</span></div>)}
       </div>
       <section className="section-block data-section">

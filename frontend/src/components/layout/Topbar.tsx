@@ -8,7 +8,7 @@ export function Topbar({ title, search, onMenu, onSearch }: { title: string; sea
   return (
     <header className="topbar">
       <Button variant="ghost" className="menu-button" onClick={onMenu} aria-label="Open navigation"><Menu size={20} /></Button>
-      <div className="topbar__title"><small>SOURCEONE /</small><strong>{title}</strong></div>
+      <div className="topbar__title"><small>PLENZA /</small><strong>{title}</strong></div>
       <label className="search-box">
         <Search size={18} />
         <Input aria-label="Search item master" placeholder="Search items, grades, standards or SKU…" value={search} onChange={(event) => onSearch(event.target.value)} />

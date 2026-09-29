@@ -1,8 +1,8 @@
 export function Logo() {
   return (
-    <div className="brand" aria-label="SourceOne">
-      <div className="brand__mark"><span /><span /><span /></div>
-      <div><strong>SOURCEONE</strong><small>INDUSTRIAL COMMERCE</small></div>
+    <div className="brand" aria-label="Plenza by HCP Plastene Bulkpack Ltd.">
+      <img className="brand__logo" src="/logo.png" alt="" />
+      <div><strong>PLENZA</strong><small>BY HCP PLASTENE BULKPACK LTD.</small></div>
     </div>
   );
 }

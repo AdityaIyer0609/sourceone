@@ -31,20 +31,20 @@ export function LoginPage({ onSuccess }: { onSuccess: (session: Session) => void
     }
   };
   return (
-    <div className="page" style={{ maxWidth: 480, margin: "48px auto" }}>
-      <div className="page-heading"><div><small>SOURCEONE</small><Heading level={1}>Sign in</Heading><p>Use a development account. These passwords are for local demonstration only.</p></div></div>
-      <section className="section-block" style={{ padding: 16 }}>
-        <div className="chip-row">
+    <div className="page sign-in">
+      <div className="page-heading"><div><img className="brand__logo" src="/logo.png" alt="" /><small>PLENZA</small><Heading level={1}>Sign in</Heading><p>Plenza by HCP Plastene Bulkpack Ltd. Use a development account. These passwords are for local demonstration only.</p></div></div>
+      <section className="section-block sign-in__card">
+        <div className="sign-in__accounts">
           {ACCOUNTS.map(([account, label]) => (
             <Button key={account} variant="ghost" className={`filter-chip${email === account ? " is-active" : ""}`} onClick={() => { setEmail(account); setPassword(DEVELOPMENT_PASSWORD); }}>{label}</Button>
           ))}
         </div>
-        <div className="form-grid">
+        <div className="sign-in__fields">
           <label>Email<Input aria-label="Email" value={email} onChange={(event) => setEmail(event.target.value)} /></label>
           <label>Password<Input aria-label="Password" type="password" value={password} onChange={(event) => setPassword(event.target.value)} /></label>
         </div>
         {error && <p className="negative">{error}</p>}
-        <div className="modal-actions"><Button disabled={busy || !email || !password} onClick={() => void submit()}>{busy ? "Signing in…" : "Sign in"}</Button></div>
+        <div className="sign-in__actions"><Button disabled={busy || !email || !password} onClick={() => void submit()}>{busy ? "Signing in…" : "Sign in"}</Button></div>
       </section>
     </div>
   );

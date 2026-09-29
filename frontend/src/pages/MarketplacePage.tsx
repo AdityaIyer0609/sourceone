@@ -1,5 +1,5 @@
 import { ArrowRight, ChevronDown, ChevronRight, MessageSquareText, ReceiptText, RefreshCw, Truck, type LucideIcon } from "lucide-react";
-import { Fragment, useState } from "react";
+import { Fragment } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { paths } from "../app/paths";
 import { AsyncContent } from "../components/feedback/AsyncContent";
@@ -7,7 +7,7 @@ import { MarketTable } from "../components/market/MarketTable";
 import { ProductCard } from "../components/product/ProductCard";
 import { ProductVisual } from "../components/product/ProductVisual";
 import { Badge, Button, Heading } from "../components/ui";
-import { listProducts, type Product } from "../lib/api/products";
+import { listProducts } from "../lib/api/products";
 import { useApiQuery } from "../lib/api/useApiQuery";
 import { useBenchmarks } from "../lib/api/useBenchmarks";
 import { formatMoney, formatPercent, movementDirection, titleCase } from "../lib/pricingFormat";
@@ -21,41 +21,25 @@ const shortcuts: { icon: LucideIcon; title: string; note: string; to: string }[]
   { icon: RefreshCw, title: "Reorder from history", note: "Repeat with current market rates", to: paths.reorder },
 ];
 
-function catalogueLink(search: string, category: string | null) {
-  const params = new URLSearchParams();
-  if (search) params.set("q", search);
-  if (category) params.set("category", category);
-  const query = params.toString();
-  return query ? `${paths.catalogue}?${query}` : paths.catalogue;
+function catalogueLink(search: string) {
+  return search ? `${paths.catalogue}?${new URLSearchParams({ q: search })}` : paths.catalogue;
 }
 
 function categoryGlyph(category: string) {
   return category.replace(/[^a-z0-9]/gi, "").slice(0, 4).toUpperCase() || "ITEM";
 }
 
-function categoriesOf(products: Product[]) {
-  const groups = new Map<string, { count: number; subcategories: Set<string> }>();
-  for (const product of products) {
-    const group = groups.get(product.category) ?? { count: 0, subcategories: new Set<string>() };
-    group.count += 1;
-    if (product.subcategory) group.subcategories.add(product.subcategory);
-    groups.set(product.category, group);
-  }
-  return [...groups.entries()].sort(([a], [b]) => a.localeCompare(b));
-}
-
 export function MarketplacePage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const search = searchParams.get("q") ?? "";
-  const [category, setCategory] = useState<string | null>(null);
   const { data: benchmarks = [], error: benchmarkError, isLoading: benchmarksLoading, reload: reloadBenchmarks } = useBenchmarks();
-  const catalogue = useApiQuery(`marketplace:${search}:${category ?? ""}`, (signal) =>
-    listProducts({ q: search || undefined, category: category ?? undefined }, signal),
+  const catalogue = useApiQuery(`marketplace:${search}`, (signal) =>
+    listProducts({ q: search || undefined }, signal),
   );
   const products = catalogue.data ?? [];
   const rail = useApiQuery("marketplace-categories", (signal) => listProducts({}, signal));
-  const categories = categoriesOf(rail.data ?? []);
+  const materials = [...(rail.data ?? [])].sort((a, b) => a.name.localeCompare(b.name));
   const liveCount = benchmarks.filter((benchmark) => benchmark.availability === "available").length;
   const ticker = benchmarks.filter((benchmark) => benchmark.current).slice(0, 3);
   return (
@@ -87,12 +71,12 @@ export function MarketplacePage() {
       </section>
 
       <section className="section-block">
-        <div className="section-title"><div><small>ITEM MASTER</small><Heading level={2}>Source by material</Heading></div><Button variant="ghost" onClick={() => navigate(catalogueLink(search, category))}>View all {rail.data?.length ?? 0} items <ArrowRight size={16} /></Button></div>
-        <AsyncContent isLoading={rail.isLoading && !rail.data} error={rail.error} onRetry={rail.reload} isEmpty={!rail.isLoading && !rail.error && categories.length === 0} emptyTitle="No active products" emptyMessage="The SourceOne catalogue has no active products yet." loadingLabel="Loading catalogue…">
+        <div className="section-title"><div><small>ITEM MASTER</small><Heading level={2}>Source by material</Heading></div><Button variant="ghost" onClick={() => navigate(catalogueLink(search))}>View all {rail.data?.length ?? 0} items <ArrowRight size={16} /></Button></div>
+        <AsyncContent isLoading={rail.isLoading && !rail.data} error={rail.error} onRetry={rail.reload} isEmpty={!rail.isLoading && !rail.error && materials.length === 0} emptyTitle="No active products" emptyMessage="The Plenza catalogue has no active products yet." loadingLabel="Loading catalogue…">
           <div className="category-rail">
-            {categories.map(([name, group]) => (
-              <Button variant="ghost" className={`category-tile${category === name ? " is-active" : ""}`} key={name} onClick={() => setCategory(category === name ? null : name)}>
-                <ProductVisual glyph={categoryGlyph(name)} /><span><strong>{titleCase(name)}</strong><small>{group.count} {group.count === 1 ? "product" : "products"}{group.subcategories.size ? ` · ${[...group.subcategories].sort().join(", ")}` : ""}</small></span><ArrowRight size={17} />
+            {materials.map((product) => (
+              <Button variant="ghost" className="category-tile" key={product.productCode} onClick={() => navigate(paths.productDetail(product.productCode))}>
+                <ProductVisual glyph={categoryGlyph(product.productCode)} /><span><strong>{product.name}</strong><small>{titleCase(product.category)}</small><small>{product.subcategory}</small></span><ArrowRight size={17} />
               </Button>
             ))}
           </div>
@@ -102,7 +86,7 @@ export function MarketplacePage() {
       <div className="market-grid">
         <section className="section-block rates-panel">
           <div className="section-title"><div><small>MARKET PULSE</small><Heading level={2}>Live benchmark rates <Badge tone="positive"><span className="live-dot" /> LIVE</Badge></Heading></div><Button variant="ghost" onClick={() => navigate(paths.liveRates)}>Open rate desk <ArrowRight size={16} /></Button></div>
-          <AsyncContent isLoading={benchmarksLoading && !benchmarks.length} error={benchmarkError} onRetry={reloadBenchmarks} isEmpty={!benchmarks.length} emptyTitle="No benchmarks yet" loadingLabel="Loading SourceOne benchmarks…">
+          <AsyncContent isLoading={benchmarksLoading && !benchmarks.length} error={benchmarkError} onRetry={reloadBenchmarks} isEmpty={!benchmarks.length} emptyTitle="No benchmarks yet" loadingLabel="Loading Plenza benchmarks…">
             <MarketTable compact benchmarks={benchmarks} onSelect={(code) => navigate(`${paths.liveRates}?series=${encodeURIComponent(code)}`)} />
           </AsyncContent>
         </section>
@@ -115,8 +99,8 @@ export function MarketplacePage() {
       </div>
 
       <section className="section-block">
-        <div className="section-title"><div><small>SOURCEONE CATALOGUE</small><Heading level={2}>{category ? titleCase(category) : "Active products"}</Heading></div><Button variant="ghost" onClick={() => navigate(catalogueLink(search, category))}>View catalogue <ChevronDown size={15} /></Button></div>
-        <AsyncContent isLoading={catalogue.isLoading && !catalogue.data} error={catalogue.error} onRetry={catalogue.reload} isEmpty={!catalogue.isLoading && !catalogue.error && products.length === 0} emptyTitle="No matching products" emptyMessage={search || category ? "No active SourceOne product matches this search or category." : "The SourceOne catalogue has no active products yet."} loadingLabel="Loading products…">
+        <div className="section-title"><div><small>PLENZA CATALOGUE</small><Heading level={2}>Active products</Heading></div><Button variant="ghost" onClick={() => navigate(catalogueLink(search))}>View catalogue <ChevronDown size={15} /></Button></div>
+        <AsyncContent isLoading={catalogue.isLoading && !catalogue.data} error={catalogue.error} onRetry={catalogue.reload} isEmpty={!catalogue.isLoading && !catalogue.error && products.length === 0} emptyTitle="No matching products" emptyMessage={search ? "No active Plenza product matches this search." : "The Plenza catalogue has no active products yet."} loadingLabel="Loading products…">
           <div className="product-row">
             {products.map((product) => <ProductCard key={product.productCode} product={product} onOpen={() => navigate(paths.productDetail(product.productCode))} />)}
           </div>

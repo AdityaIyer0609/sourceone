@@ -7,8 +7,8 @@ import { Sparkline } from "./Sparkline";
 export function MarketTable({ benchmarks, compact = false, onSelect }: { benchmarks: BenchmarkSummary[]; compact?: boolean; onSelect?: (seriesCode: string) => void }) {
   return (
     <div className="market-table-wrap">
-      <table className="market-table">
-        <thead><tr><th>Material</th><th>SourceOne benchmark</th><th>vs previous</th><th>7D movement</th><th>Market</th><th>As of</th></tr></thead>
+      <table className={`market-table${compact ? " market-table--compact" : ""}`}>
+        <thead><tr><th>Material</th><th>Plenza benchmark</th><th>vs previous</th><th>7D movement</th><th>Market</th><th>As of</th></tr></thead>
         <tbody>
           {(compact ? benchmarks.slice(0, 4) : benchmarks).map((benchmark) => {
             const direction = movementDirection(benchmark);

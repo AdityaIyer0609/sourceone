@@ -209,7 +209,7 @@ export function ItemMasterWorkspace() {
             <Button variant="secondary" {...unavailable}>Export</Button>
           </div>
         </div>
-        <AsyncContent isLoading={products.isLoading && !products.data} error={products.error} onRetry={products.reload} isEmpty={Boolean(products.data) && visible.length === 0} emptyTitle="No products" emptyMessage="Add a SourceOne product to sell it." loadingLabel="Loading products…">
+        <AsyncContent isLoading={products.isLoading && !products.data} error={products.error} onRetry={products.reload} isEmpty={Boolean(products.data) && visible.length === 0} emptyTitle="No products" emptyMessage="Add a Plenza product to sell it." loadingLabel="Loading products…">
           <div className="market-table-wrap"><table className="market-table"><thead><tr><th>Product code</th><th>Name / category</th><th>UOM</th><th>Benchmark</th><th>Listings</th><th>Status</th><th/></tr></thead><tbody>{visible.map((row) => (
             <tr key={row.productCode} onClick={() => edit(row)} style={{ cursor: "pointer" }}>
               <td><strong>{row.productCode}</strong><small>{row.subcategory ?? "—"}</small></td>

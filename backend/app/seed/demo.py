@@ -23,7 +23,8 @@ from app.db.session import SessionLocal
 from app.identity.passwords import hash_password
 from app.identity.service import actor_for
 from app.models.catalogue import Grade, GradeEquivalence, Market, MarketAlias, Producer, ProducerGradeAlias, Product
-from app.models.freight import FreightRule
+from app.freight.constants import DEFAULT_RATE_PER_KM
+from app.models.freight import FreightDistanceRate, FreightRule
 from app.models.listing import SupplierListing
 from app.models.identity import Organisation, Role, User, UserRole
 from app.models.pricing import RateSeries, RateSource, SourceRate
@@ -37,7 +38,7 @@ ERP_SOURCE_CODE = "ERP-DOMESTICPRICE1-DEMO"
 DEMO_NOTE = "DEMO FIXTURE: synthetic rows shaped like ERP DomesticPrice1; not from a live ERP connection."
 
 DEMO_TABLES = (
-    "product_answers", "product_questions", "product_documents", "purchase_request_suppliers", "purchase_requests", "freight_rules", "supplier_listings", "erp_price_row_imports", "erp_grades", "erp_customers", "erp_sync_runs", "order_status_events", "orders", "negotiation_versions", "negotiations", "product_rate_series", "products", "pricing_audit_events", "benchmark_rate_inputs", "benchmark_rates", "source_rates", "import_batches",
+    "product_answers", "product_questions", "product_documents", "purchase_request_suppliers", "purchase_requests", "pin_coordinates", "road_distances", "freight_distance_rates", "freight_defaults", "freight_rules", "supplier_listings", "erp_price_row_imports", "erp_grades", "erp_customers", "erp_sync_runs", "order_status_events", "orders", "negotiation_versions", "negotiations", "product_rate_series", "products", "pricing_audit_events", "benchmark_rate_inputs", "benchmark_rates", "source_rates", "import_batches",
     "rate_series", "rate_sources", "market_aliases", "grade_equivalence", "producer_grade_aliases",
     "markets", "grades", "producers", "user_roles", "users", "organisations",
 )
@@ -532,6 +533,9 @@ def ensure_demo_freight(session: Session) -> int:
             minimum_freight=Decimal(minimum) if minimum else None,
             is_active=active, effective_from=effective_from, effective_to=None,
         ))
+        added += 1
+    if session.scalar(select(FreightDistanceRate).where(FreightDistanceRate.currency == "INR")) is None:
+        session.add(FreightDistanceRate(currency="INR", rate_per_km=DEFAULT_RATE_PER_KM, minimum_freight=None, is_active=True))
         added += 1
     return added
 

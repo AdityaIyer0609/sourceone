@@ -9,7 +9,7 @@ from app.models.catalogue import (
     ProductRateSeries,
 )
 from app.models.erp import ErpCustomer, ErpGrade, ErpPriceRowImport, ErpSyncRun
-from app.models.freight import FreightRule
+from app.models.freight import FreightDefault, FreightDistanceRate, FreightRule, PinCoordinate, RoadDistance
 from app.models.identity import Organisation, Permission, Role, RolePermission, User, UserRole
 from app.models.listing import SupplierListing
 from app.models.negotiation import Negotiation, NegotiationVersion

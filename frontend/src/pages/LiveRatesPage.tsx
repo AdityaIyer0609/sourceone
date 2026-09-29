@@ -38,7 +38,7 @@ export function LiveRatesPage() {
         <div><small>MARKET INTELLIGENCE</small><Heading level={1}>Live rate desk</Heading><p>Auditable benchmark pricing across primary industrial material markets.</p></div>
         <div className="market-open"><span className="live-dot" /><div><strong>{liveCount} of {benchmarks.length} benchmarks live</strong><small>{updatedAt ? `Last refresh ${formatClock(updatedAt)}` : "Refreshing…"}</small></div></div>
       </div>
-      <AsyncContent isLoading={isLoading && !benchmarks.length} error={error} onRetry={reload} isEmpty={!benchmarks.length} emptyTitle="No benchmarks published yet" loadingLabel="Loading SourceOne benchmarks…">
+      <AsyncContent isLoading={isLoading && !benchmarks.length} error={error} onRetry={reload} isEmpty={!benchmarks.length} emptyTitle="No benchmarks published yet" loadingLabel="Loading Plenza benchmarks…">
         <div className="index-strip">
           {benchmarks.slice(0, 4).map((benchmark) => {
             const direction = movementDirection(benchmark);

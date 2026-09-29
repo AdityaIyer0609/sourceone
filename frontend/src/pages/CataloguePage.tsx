@@ -61,7 +61,7 @@ export function CataloguePage() {
     <div className="page">
       <div className="page-heading">
         <div><small>{isLoading && products.length === 0 ? "LOADING CATALOGUE" : `${products.length} ACTIVE ITEMS`}</small><Heading level={1}>Industrial item master</Heading><p>Standardized specifications, live supply and auditable market rates.</p></div>
-        <Button variant="secondary" aria-disabled="true" title="BOM upload is not part of the SourceOne catalogue."><FileText size={17} /> Upload BOM</Button>
+        <Button variant="secondary" aria-disabled="true" title="BOM upload is not part of the Plenza catalogue."><FileText size={17} /> Upload BOM</Button>
       </div>
       <AsyncContent isLoading={isLoading && products.length === 0} error={error} onRetry={reload} loadingLabel="Loading catalogue…">
         <div className="catalogue-toolbar">
@@ -80,7 +80,7 @@ export function CataloguePage() {
               <Checkbox key={category} label={titleCase(category)} count={count} checked={selectedCategories.includes(category)} onChange={() => { setPickedCategories(toggle(selectedCategories, category)); setSubcategories([]); }} />
             ))}
             <div><strong>Subcategory</strong><ChevronDown size={16} /></div>
-            {subcategoryOptions.length === 0 ? <small>Not specified</small> : subcategoryOptions.map(([subcategory, count]) => (
+            {subcategoryOptions.length === 0 ? <p className="filter-note">Not specified</p> : subcategoryOptions.map(([subcategory, count]) => (
               <Checkbox key={subcategory} label={subcategory} count={count} checked={subcategories.includes(subcategory)} onChange={() => setSubcategories(toggle(subcategories, subcategory))} />
             ))}
             <div><strong>Availability</strong><ChevronDown size={16} /></div>
@@ -88,9 +88,9 @@ export function CataloguePage() {
               <Checkbox key={state} label={state === "available" ? "Benchmark live" : "Rate on request"} count={count} checked={availability.includes(state)} onChange={() => setAvailability(toggle(availability, state))} />
             ))}
             <div><strong>Certification</strong><ChevronDown size={16} /></div>
-            <small>Not specified</small>
+            <p className="filter-note">Not specified</p>
             <div><strong>Dispatch market</strong><ChevronDown size={16} /></div>
-            <small>Not specified</small>
+            <p className="filter-note">Not specified</p>
           </aside>
           <section>
             <div className="result-meta"><span><strong>{filtered.length}</strong> matching items</span><Button variant="ghost" aria-disabled="true" title="Items are listed by product name.">Sort: Name <ChevronDown size={15} /></Button></div>
@@ -99,7 +99,7 @@ export function CataloguePage() {
                 {filtered.map((product) => <ProductCard key={product.productCode} product={product} market={market} onOpen={() => navigate(paths.productDetail(product.productCode) + (market ? `?market=${encodeURIComponent(market)}` : ""))} />)}
               </div>
             ) : (
-              <EmptyState icon={SearchX} title="No matching items" message={search || activeFilters ? "No active SourceOne product matches this search or filter." : "No catalogue products are available yet."} />
+              <EmptyState icon={SearchX} title="No matching items" message={search || activeFilters ? "No active Plenza product matches this search or filter." : "No catalogue products are available yet."} />
             )}
           </section>
         </div>

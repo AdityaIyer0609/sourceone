@@ -50,6 +50,9 @@ class Settings(BaseSettings):
     erp_customer_database: str = "Despatch"
     erp_rate_source_code: str = "ERP-DOMESTICPRICE1"
 
+    # Road distance for freight fallback only. Never sent to the browser.
+    geoapify_api_key: SecretStr | None = None
+
 
 @lru_cache
 def get_settings() -> Settings:

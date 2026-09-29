@@ -80,7 +80,7 @@ export function UsersWorkspace() {
         <div className="data-toolbar">
           <label className="search-box search-box--small"><Search size={17}/><Input placeholder="Search users…" value={search} onChange={(event) => setSearch(event.target.value)} /></label>
         </div>
-        <AsyncContent isLoading={users.isLoading && !users.data} error={users.error} onRetry={users.reload} isEmpty={Boolean(users.data) && visible.length === 0} emptyTitle="No users" emptyMessage="Add a SourceOne user to give them a role." loadingLabel="Loading users…">
+        <AsyncContent isLoading={users.isLoading && !users.data} error={users.error} onRetry={users.reload} isEmpty={Boolean(users.data) && visible.length === 0} emptyTitle="No users" emptyMessage="Add a Plenza user to give them a role." loadingLabel="Loading users…">
           <div className="market-table-wrap"><table className="market-table"><thead><tr><th>Name</th><th>Email</th><th>Organisation</th><th>Role</th><th>Status</th><th/></tr></thead><tbody>{visible.map((row) => (
             <tr key={row.id}>
               <td><strong>{row.fullName}</strong></td>

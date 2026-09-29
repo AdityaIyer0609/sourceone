@@ -78,11 +78,11 @@ function NegotiationRoom({ negotiation, order, onChanged, onOrdersChanged }: { n
           {shown ? (
             <>
               <div className="offer-head"><div><div className="avatar avatar--square">{initials(partyName(shown.offeredBy))}</div><span><strong>{partyName(shown.offeredBy)}</strong><small>{shown.author} · {offerLabel(shown.offeredBy)}</small></span></div><Badge tone={negotiated?.versionNumber === shown.versionNumber ? "positive" : shown === latest ? "positive" : "neutral"}>{negotiated?.versionNumber === shown.versionNumber ? "ACCEPTED" : shown === latest ? "LATEST OFFER" : "EARLIER OFFER"} · V{shown.versionNumber}</Badge></div>
-              <div className="offer-price"><small>{negotiated?.versionNumber === shown.versionNumber ? "NEGOTIATED PRICE" : "OFFERED RATE"}</small><strong>{formatMoney(shown.offeredPrice)}<em>/ {unit}</em></strong><span>SourceOne benchmark at start: {benchmarkText}{benchmark.asOfDate ? ` (as of ${formatDate(benchmark.asOfDate)})` : ""}</span></div>
+              <div className="offer-price"><small>{negotiated?.versionNumber === shown.versionNumber ? "NEGOTIATED PRICE" : "OFFERED RATE"}</small><strong>{formatMoney(shown.offeredPrice)}<em>/ {unit}</em></strong><span>Plenza benchmark at start: {benchmarkText}{benchmark.asOfDate ? ` (as of ${formatDate(benchmark.asOfDate)})` : ""}</span></div>
               <div className="offer-terms">{[
                 ["Quantity", quantityText(shown.quantity, shown.uom)],
                 ["Currency", `${negotiation.currency} / ${unit}`],
-                ["SourceOne benchmark (reference)", benchmarkText],
+                ["Plenza benchmark (reference)", benchmarkText],
                 ["Negotiated price", negotiated ? `${formatMoney(negotiated.price)} / ${unit}` : "Not agreed yet"],
                 ["Benchmark as of", benchmark.asOfDate ? `${formatDate(benchmark.asOfDate)}${benchmark.state === "stale" ? " · Stale" : ""}` : "—"],
                 ["Offered", formatDateTime(shown.createdAt)],
@@ -112,17 +112,17 @@ function NegotiationRoom({ negotiation, order, onChanged, onOrdersChanged }: { n
           {negotiated ? (
             <div className="saving-callout"><span>Negotiated price</span><strong>{formatMoney(negotiated.price)}/{unit}</strong><small>Accepted offer V{negotiated.versionNumber} · {quantityText(negotiated.quantity, negotiated.uom)}</small></div>
           ) : (
-            <div className="saving-callout"><span>SourceOne benchmark at start</span><strong>{benchmarkText}</strong><small>Reference value only · not an offer</small></div>
+            <div className="saving-callout"><span>Plenza benchmark at start</span><strong>{benchmarkText}</strong><small>Reference value only · not an offer</small></div>
           )}
         </aside>
       </div>
-      <section className="benchmark-bar"><BarChart3 size={22}/><div><strong>SourceOne benchmark (reference)</strong><small>{benchmark.seriesCode ? `${benchmark.seriesCode} · ${benchmark.basis ?? ""} · ` : ""}Snapshot taken when the negotiation started</small></div><span><small>BENCHMARK</small><strong>{benchmarkText}</strong></span><div className="benchmark-scale"><i/><b>{latest ? offerLabel(latest.offeredBy) : "No offer yet"}</b></div><span><small>LATEST OFFER</small><strong>{latest ? `${formatMoney(latest.offeredPrice)} / ${unit}` : "—"}</strong></span></section>
+      <section className="benchmark-bar"><BarChart3 size={22}/><div><strong>Plenza benchmark (reference)</strong><small>{benchmark.seriesCode ? `${benchmark.seriesCode} · ${benchmark.basis ?? ""} · ` : ""}Snapshot taken when the negotiation started</small></div><span><small>BENCHMARK</small><strong>{benchmarkText}</strong></span><div className="benchmark-scale"><i/><b>{latest ? offerLabel(latest.offeredBy) : "No offer yet"}</b></div><span><small>LATEST OFFER</small><strong>{latest ? `${formatMoney(latest.offeredPrice)} / ${unit}` : "—"}</strong></span></section>
       {orderOpen && <CreateOrderModal negotiation={negotiation} onClose={() => setOrderOpen(false)} onCreated={onOrdersChanged} onViewOrder={viewOrder} />}
       {counterOpen && (
         <OfferModal
           title={latest ? "Send counter offer" : "Submit offer"}
           productName={negotiation.product.name}
-          context={`${negotiation.negotiationNumber} · SourceOne benchmark (reference): ${benchmarkText}`}
+          context={`${negotiation.negotiationNumber} · Plenza benchmark (reference): ${benchmarkText}`}
           currency={negotiation.currency}
           uom={negotiation.uom}
           initialQuantity={latest?.quantity ?? negotiation.quantity}

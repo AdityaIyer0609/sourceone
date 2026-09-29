@@ -32,11 +32,14 @@ def _origin(world, pin="560001", label="Bengaluru"):
     world.session.flush()
 
 
-def _estimate(client, world, product, listing, quantity="1000", pin="390020"):
-    return client.post(ESTIMATES, json={
+def _estimate(client, world, product, listing, quantity="1000", pin="390020", include_distance=False):
+    body = {
         "supplierUserId": listing["supplierUserId"], "productCode": product.product_code,
         "quantity": quantity, "destinationPin": pin,
-    }, headers=as_user(world, "buyer"))
+    }
+    if include_distance:
+        body["includeDistance"] = True
+    return client.post(ESTIMATES, json=body, headers=as_user(world, "buyer"))
 
 
 def test_admin_creates_a_matching_freight_rule(client, world, product):
@@ -116,6 +119,41 @@ def test_currency_mismatch_does_not_invent_a_rate(client, world, product):
     assert estimate["freightStatus"] == "on_request"
     assert estimate["freight"] is None
     assert estimate["supplierAskingPrice"]["currency"] == "INR"
+
+
+def test_pin_zone_covers_other_pins_and_exact_lane_wins(client, world, product):
+    _origin(world, pin="560001")
+    listing = _create(client, world, product, askingPrice="100.0000").json()
+    zone = _rule(client, world, originPin="560", originLabel="Bengaluru zone", destinationPin="411", destinationLabel="Pune zone", ratePerKg="1.0000", minimumFreight=None)
+    assert zone.status_code == 201, zone.text
+    covered = _estimate(client, world, product, listing, quantity="1000", pin="411014").json()
+    assert covered["freightStatus"] == "estimated"
+    assert covered["match"] == "zone"
+    assert covered["freight"] == {"amount": "1000.0000", "currency": "INR"}
+    exact = _rule(client, world, destinationPin="411014", destinationLabel="Pune", ratePerKg="3.0000", minimumFreight=None)
+    assert exact.status_code == 201, exact.text
+    chosen = _estimate(client, world, product, listing, quantity="1000", pin="411014").json()
+    assert chosen["match"] == "lane"
+    assert chosen["freight"] == {"amount": "3000.0000", "currency": "INR"}
+    assert chosen["ruleId"] == exact.json()["id"]
+
+
+def test_default_rate_covers_an_unmatched_pin(client, world, product):
+    _origin(world)
+    listing = _create(client, world, product, askingPrice="100.0000").json()
+    saved = client.put("/api/v1/admin/freight/defaults", json={
+        "currency": "INR", "ratePerKg": "0.5000", "minimumFreight": "2000", "isActive": True,
+    }, headers=as_user(world, "platform"))
+    assert saved.status_code == 200, saved.text
+    estimate = _estimate(client, world, product, listing, quantity="1000", pin="682001").json()
+    assert estimate["match"] == "default"
+    assert estimate["freight"] == {"amount": "2000.0000", "currency": "INR"}
+    assert estimate["minimumFreightApplied"] is True
+    assert "not a measured distance" in estimate["note"]
+    _rule(client, world, destinationPin="682001", destinationLabel="Kochi", ratePerKg="4.0000", minimumFreight=None)
+    lane = _estimate(client, world, product, listing, quantity="1000", pin="682001").json()
+    assert lane["match"] == "lane"
+    assert lane["freight"] == {"amount": "4000.0000", "currency": "INR"}
 
 
 def test_supplier_price_and_negotiation_stay_separate_from_landed_cost(client, world, product):

@@ -1,7 +1,7 @@
 import { ArrowRight } from "lucide-react";
 import { useState } from "react";
 import { getErrorMessage } from "../../lib/api/client";
-import { estimateFreight, type FreightEstimate } from "../../lib/api/freight";
+import { estimateFreight, shownFreight, type FreightBasis, type FreightEstimate } from "../../lib/api/freight";
 import { formatMoney } from "../../lib/pricingFormat";
 import { Button, Modal } from "../ui";
 import { ProductVisual } from "./ProductVisual";
@@ -30,6 +30,7 @@ export function LandedCostPreviewModal({
 }) {
   const [supplierId, setSupplierId] = useState(suppliers[0]?.id ?? "")
   const [estimate, setEstimate] = useState<FreightEstimate | null>(null)
+  const [basis, setBasis] = useState<FreightBasis>("standard")
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const supplier = suppliers.find((item) => item.id === supplierId) ?? suppliers[0]
@@ -55,6 +56,7 @@ export function LandedCostPreviewModal({
   }
 
   const money = (value: FreightEstimate["freight"]) => (value ? formatMoney(value) : "Freight on request")
+  const shown = estimate ? shownFreight(estimate, basis) : null
   return (
     <Modal open={open} title="Landed cost preview" onClose={onClose}>
       <div className="modal-product">
@@ -72,14 +74,20 @@ export function LandedCostPreviewModal({
         </select>
       </label>
       {error && <p className="negative">{error}</p>}
+      {estimate && (
+        <div className="chip-row" role="group" aria-label="Freight basis">
+          <Button variant="ghost" className={`filter-chip${basis === "standard" ? " is-active" : ""}`} onClick={() => setBasis("standard")}>Normal freight</Button>
+          <Button variant="ghost" className={`filter-chip${basis === "distance" ? " is-active" : ""}`} onClick={() => setBasis("distance")}>Road distance</Button>
+        </div>
+      )}
       <div className="modal-cost">
         <span><small>Supplier asking price</small><strong>{estimate ? formatMoney(estimate.supplierAskingPrice) : "—"} / {uom.toLowerCase()}</strong></span>
         <span><small>Material</small><strong>{estimate ? formatMoney(estimate.materialValue) : "—"}</strong></span>
-        <span><small>Estimated freight</small><strong>{estimate ? (estimate.freightStatus === "estimated" ? money(estimate.freight) : "Freight on request") : "—"}</strong></span>
-        <span><small>Estimated landed / {uom.toLowerCase()}</small><strong>{estimate?.landedCostPerUnit ? formatMoney(estimate.landedCostPerUnit) : estimate ? "Freight on request" : "—"}</strong></span>
-        <span><small>Estimated landed value</small><strong>{estimate?.landedValue ? formatMoney(estimate.landedValue) : estimate ? "Freight on request" : "—"}</strong></span>
+        <span><small>{shown?.label ?? "Estimated freight"}</small><strong>{shown ? (shown.status === "estimated" ? money(shown.freight) : "Freight on request") : "—"}</strong></span>
+        <span><small>Estimated landed / {uom.toLowerCase()}</small><strong>{shown?.perUnit ? formatMoney(shown.perUnit) : estimate ? "Freight on request" : "—"}</strong></span>
+        <span><small>Estimated landed value</small><strong>{shown?.landed ? formatMoney(shown.landed) : estimate ? "Freight on request" : "—"}</strong></span>
       </div>
-      <p><small>{estimate?.note ?? "Estimate only. The SourceOne benchmark and the negotiated price stay separate."}</small></p>
+      <p><small>{shown?.note ?? "Estimate only. The Plenza benchmark and the negotiated price stay separate."}</small></p>
       <div className="modal-actions">
         <Button variant="secondary" onClick={onClose}>Close</Button>
         <Button disabled={!supplier || !pinOk || busy} onClick={() => void calculate()}>{busy ? "Calculating…" : "Calculate"} <ArrowRight size={16}/></Button>

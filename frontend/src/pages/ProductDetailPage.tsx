@@ -5,7 +5,6 @@ import { paths } from "../app/paths";
 import { AsyncContent } from "../components/feedback/AsyncContent";
 import { EmptyState } from "../components/feedback/EmptyState";
 import { Price } from "../components/market/Price";
-import { Sparkline } from "../components/market/Sparkline";
 import { OfferModal } from "../components/negotiation/OfferModal";
 import { LandedCostPreviewModal } from "../components/product/LandedCostPreviewModal";
 import { ProductCard } from "../components/product/ProductCard";
@@ -18,7 +17,7 @@ import { startNegotiation } from "../lib/api/negotiations";
 import { getProduct, listProducts, selectPricing } from "../lib/api/products";
 import { answerProductQuestion, askProductQuestion, downloadProductDocument, listProductDocuments, listProductQuestions } from "../lib/api/productContent";
 import { useApiQuery } from "../lib/api/useApiQuery";
-import { BENCHMARK_GLYPH, formatDate, formatMoney, formatPercent, movementDirection, sparklineValues, titleCase } from "../lib/pricingFormat";
+import { BENCHMARK_GLYPH, formatDate, formatMoney, formatPercent, movementDirection, titleCase } from "../lib/pricingFormat";
 
 function useDebounced<T>(value: T, delayMs: number) {
   const [debounced, setDebounced] = useState(value);
@@ -36,10 +35,10 @@ function EstimateSummary({ benchmark, quantity }: { benchmark: BenchmarkSummary 
     benchmark?.current && valid ? `estimate:${benchmark.seriesCode}:${debouncedQuantity}` : null,
     (signal) => getMaterialEstimate(benchmark?.seriesCode ?? "", debouncedQuantity, benchmark?.unit.code, signal),
   );
-  const label = "Estimated material value at SourceOne benchmark";
+  const label = "Estimated material value at Plenza benchmark";
 
   if (!benchmark?.current || estimate.data?.availability === "rate_on_request") {
-    return <div className="cost-summary"><span>{label}</span><strong>Rate on request</strong><small>No valid SourceOne benchmark is in effect for this product.</small></div>;
+    return <div className="cost-summary"><span>{label}</span><strong>Rate on request</strong><small>No valid Plenza benchmark is in effect for this product.</small></div>;
   }
   if (!valid) {
     return <div className="cost-summary"><span>{label}</span><strong>—</strong><small>Enter a quantity greater than zero.</small></div>;
@@ -119,20 +118,17 @@ export function ProductDetailPage() {
               })}<span><small>MOQ</small><strong>{moq}</strong></span></div>
               {offers.length > 0 && <div className="spec-strip">{offers.map((offer) => <span key={offer.id}><small>{offer.organisation} · {titleCase(offer.availability ?? "")}</small><strong>Asking {formatMoney({ amount: offer.askingPrice ?? "0", currency: benchmark?.currency ?? "INR" })} · MOQ {Number(offer.minimumQuantity).toLocaleString("en-IN")}</strong></span>)}</div>}
               <div className="rate-module">
-                <div>
-                  <small>SOURCEONE BENCHMARK {stale ? <Badge tone="warning">STALE</Badge> : benchmark?.current && <span className="live-dot" />}</small>
+                <small>PLENZA BENCHMARK {stale ? <Badge tone="warning">STALE</Badge> : benchmark?.current && <span className="live-dot" />}</small>
+                <div className="rate-module__row">
                   <Price value={benchmark?.current?.value ?? null} uom={benchmark?.unit.label ?? product.uom.label} change={benchmark?.movement.state === "ok" ? benchmark.movement.percent : null} />
-                  <p>
-                    {benchmark?.current
-                      ? `${benchmark.priceBasis.label} ${benchmark.market.label} · ${benchmark.taxBasis.label} · As of ${formatDate(benchmark.current.freshness.asOfDate)}`
-                      : benchmark ? `${benchmark.market.label} · No valid benchmark is in effect · Rate on request` : "No SourceOne benchmark is mapped to this product · Rate on request"}
-                    {otherMarkets.length > 0 && ` · Also benchmarked: ${otherMarkets.join(", ")}`}
-                  </p>
-                </div>
-                <div className="rate-module__chart">
-                  <Sparkline large down={direction === "down"} values={sparklineValues(benchmark?.sparkline.points ?? [])} />
                   <small>{direction && benchmark?.movement.percent != null ? `vs previous ${formatPercent(benchmark.movement.percent)}` : "No previous benchmark"}</small>
                 </div>
+                <p>
+                  {benchmark?.current
+                    ? `${benchmark.priceBasis.label} ${benchmark.market.label} · ${benchmark.taxBasis.label} · As of ${formatDate(benchmark.current.freshness.asOfDate)}`
+                    : benchmark ? `${benchmark.market.label} · No valid benchmark is in effect · Rate on request` : "No Plenza benchmark is mapped to this product · Rate on request"}
+                  {otherMarkets.length > 0 && ` · Also benchmarked: ${otherMarkets.join(", ")}`}
+                </p>
                 <Button variant="ghost" disabled={!benchmark} onClick={() => benchmark && navigate(`${paths.liveRates}?series=${encodeURIComponent(benchmark.seriesCode)}`)}><History size={16} /> Rate history</Button>
               </div>
               <div className="procure-box">
@@ -157,7 +153,7 @@ export function ProductDetailPage() {
               <Button variant="ghost" className={tab === "documents" ? "is-active" : ""} onClick={() => setTab("documents")}>Documents</Button>
               <Button variant="ghost" className={tab === "questions" ? "is-active" : ""} onClick={() => setTab("questions")}>Q&A</Button>
             </div>
-            {tab === "specifications" && <div className="spec-grid">{product.specifications.map((field) => <div key={field.key}><small>{field.label}</small><strong>{field.value ?? "Not specified"}</strong></div>)}</div>}
+            {tab === "specifications" && <div className="spec-grid">{product.specifications.map((field) => <div key={field.key} className={field.key === "description" ? "spec-grid__wide" : undefined}><small>{field.label}</small><strong>{field.value ?? "Not specified"}</strong></div>)}</div>}
             {tab === "supply" && (offers.length > 0 ? <div className="spec-grid">{offers.map((offer) => <div key={offer.id}><small>{offer.organisation} · {titleCase(offer.availability ?? "")}</small><strong>Asking {formatMoney({ amount: offer.askingPrice ?? "0", currency: benchmark?.currency ?? "INR" })} · MOQ {Number(offer.minimumQuantity).toLocaleString("en-IN")} {product.uom.code}</strong></div>)}</div> : <EmptyState title="No active listings" message="No supplier is listing this product." />)}
             {tab === "documents" && (
               <AsyncContent isLoading={documents.isLoading && !documents.data} error={documents.error} onRetry={documents.reload} isEmpty={!documents.isLoading && !documents.error && (documents.data ?? []).length === 0} emptyTitle="No documents" emptyMessage="No documents are on file for this product." loadingLabel="Loading documents…">
@@ -188,8 +184,8 @@ export function ProductDetailPage() {
           title="Start negotiation"
           productName={product.name}
           context={benchmark?.current
-            ? `SourceOne benchmark (reference): ${formatMoney(benchmark.current.value)} / ${benchmark.unit.label} · ${benchmark.market.label} · As of ${formatDate(benchmark.current.freshness.asOfDate)}`
-            : "No valid SourceOne benchmark · Rate on request"}
+            ? `Plenza benchmark (reference): ${formatMoney(benchmark.current.value)} / ${benchmark.unit.label} · ${benchmark.market.label} · As of ${formatDate(benchmark.current.freshness.asOfDate)}`
+            : "No valid Plenza benchmark · Rate on request"}
           currency={benchmark?.currency ?? "INR"}
           uom={product.uom.code}
           initialQuantity={String(quantity)}

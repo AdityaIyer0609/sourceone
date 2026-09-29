@@ -12,7 +12,16 @@ from app.freight.constants import FreightPermission
 from app.identity.service import Actor
 from app.models.freight import FreightRule
 from app.pricing.constants import PricingPermission
-from app.schemas.freight import FreightEstimateIn, FreightEstimateOut, FreightRuleIn, FreightRuleOut
+from app.schemas.freight import (
+    FreightDefaultIn,
+    FreightDefaultOut,
+    FreightDistanceRateIn,
+    FreightDistanceRateOut,
+    FreightEstimateIn,
+    FreightEstimateOut,
+    FreightRuleIn,
+    FreightRuleOut,
+)
 
 router = APIRouter(tags=["freight"])
 
@@ -64,11 +73,50 @@ def update_rule(rule_id: uuid.UUID, body: FreightRuleIn, db: DbSession, actor: M
     return _rule(rule)
 
 
+def _default(row) -> FreightDefaultOut:
+    return FreightDefaultOut(
+        id=row.id, currency=row.currency, rate_per_kg=f"{row.rate_per_kg:.4f}",
+        minimum_freight=_amount(row.minimum_freight), is_active=row.is_active,
+    )
+
+
+@router.get("/admin/freight/defaults", response_model=list[FreightDefaultOut])
+def list_defaults(db: DbSession, _: Manager):
+    return [_default(row) for row in service.list_defaults(db)]
+
+
+@router.put("/admin/freight/defaults", response_model=FreightDefaultOut)
+def save_default(body: FreightDefaultIn, db: DbSession, actor: Manager):
+    row = service.save_default(db, actor, **body.model_dump())
+    db.commit()
+    return _default(row)
+
+
+def _distance_rate(row) -> FreightDistanceRateOut:
+    return FreightDistanceRateOut(
+        id=row.id, currency=row.currency, rate_per_km=f"{row.rate_per_km:.4f}",
+        minimum_freight=_amount(row.minimum_freight), is_active=row.is_active,
+    )
+
+
+@router.get("/admin/freight/distance-rates", response_model=list[FreightDistanceRateOut])
+def list_distance_rates(db: DbSession, _: Manager):
+    return [_distance_rate(row) for row in service.list_distance_rates(db)]
+
+
+@router.put("/admin/freight/distance-rates", response_model=FreightDistanceRateOut)
+def save_distance_rate(body: FreightDistanceRateIn, db: DbSession, actor: Manager):
+    row = service.save_distance_rate(db, actor, **body.model_dump())
+    db.commit()
+    return _distance_rate(row)
+
+
 @router.post("/freight/estimates", response_model=FreightEstimateOut)
 def estimate(body: FreightEstimateIn, db: DbSession, _: Viewer):
     result = service.estimate(
         db, supplier_user_id=body.supplier_user_id, product_code=body.product_code,
         quantity=body.quantity, destination_pin=body.destination_pin,
+        include_distance=body.include_distance,
     )
     listing = result["listing"]
     status = "estimated" if result["freight"] is not None else "on_request"
@@ -89,5 +137,15 @@ def estimate(body: FreightEstimateIn, db: DbSession, _: Viewer):
         landed_cost_per_unit=money(result["per_unit"], listing.currency) if result["per_unit"] is not None else None,
         landed_value=money(result["landed"], listing.currency) if result["landed"] is not None else None,
         rule_id=result["rule"].id if result["rule"] else None,
+        match=result["match"],
+        road_distance_km=None if result["road_km"] is None else f"{result['road_km']:.3f}",
+        distance_source=result["distance_source"],
+        distance_status=result["distance_status"],
+        distance_freight=money(result["distance_freight"], listing.currency) if result["distance_freight"] is not None else None,
+        distance_minimum_applied=result["distance_minimum_applied"],
+        distance_landed_per_unit=money(result["distance_per_unit"], listing.currency) if result["distance_per_unit"] is not None else None,
+        distance_landed_value=money(result["distance_landed"], listing.currency) if result["distance_landed"] is not None else None,
+        distance_rate_per_km=None if result["distance_rate_per_km"] is None else f"{result['distance_rate_per_km']:.4f}",
+        distance_note=result["distance_note"],
         note=result["note"],
     )

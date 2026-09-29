@@ -2,7 +2,7 @@ import { useState } from "react";
 import { AsyncContent } from "../../components/feedback/AsyncContent";
 import { Badge, Button, Input } from "../../components/ui";
 import { getErrorMessage } from "../../lib/api/client";
-import { createFreightRule, listFreightRules, updateFreightRule, type FreightRule, type FreightRuleInput } from "../../lib/api/freight";
+import { createFreightRule, listFreightDefaults, listFreightDistanceRates, listFreightRules, saveFreightDefault, saveFreightDistanceRate, updateFreightRule, type FreightRule, type FreightRuleInput } from "../../lib/api/freight";
 import { useApiQuery } from "../../lib/api/useApiQuery";
 import { formatMoney } from "../../lib/pricingFormat";
 
@@ -24,6 +24,22 @@ function toInput(rule: FreightRule): FreightRuleInput {
 
 export function FreightManagement() {
   const rules = useApiQuery("freight-rules", (signal) => listFreightRules(signal));
+  const defaults = useApiQuery("freight-defaults", (signal) => listFreightDefaults(signal));
+  const currentDefault = defaults.data?.find((row) => row.currency === "INR");
+  const [defaultRate, setDefaultRate] = useState("");
+  const [defaultMinimum, setDefaultMinimum] = useState("");
+  const [defaultActive, setDefaultActive] = useState<boolean | null>(null);
+  const shownRate = defaultRate || currentDefault?.ratePerKg || "";
+  const shownMinimum = defaultMinimum || currentDefault?.minimumFreight || "";
+  const shownActive = defaultActive ?? currentDefault?.isActive ?? false;
+  const distanceRates = useApiQuery("freight-distance-rates", (signal) => listFreightDistanceRates(signal));
+  const currentDistance = distanceRates.data?.find((row) => row.currency === "INR");
+  const [kmRate, setKmRate] = useState("");
+  const [kmMinimum, setKmMinimum] = useState("");
+  const [kmActive, setKmActive] = useState<boolean | null>(null);
+  const shownKmRate = kmRate || currentDistance?.ratePerKm || "";
+  const shownKmMinimum = kmMinimum || currentDistance?.minimumFreight || "";
+  const shownKmActive = kmActive ?? currentDistance?.isActive ?? false;
   const [draft, setDraft] = useState<FreightRuleInput>(EMPTY);
   const [editing, setEditing] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -66,9 +82,9 @@ export function FreightManagement() {
       <section className="section-block" style={{ marginBottom: 16, padding: 16 }}>
         <div className="form-grid">
           <label>Origin<Input aria-label="Origin" value={draft.originLabel} onChange={(event) => set("originLabel", event.target.value)} placeholder="City" /></label>
-          <label>Origin PIN<Input aria-label="Origin PIN" value={draft.originPin} onChange={(event) => set("originPin", event.target.value)} placeholder="6-digit PIN" /></label>
+          <label>Origin PIN<Input aria-label="Origin PIN" value={draft.originPin} onChange={(event) => set("originPin", event.target.value)} placeholder="PIN or 3-digit zone" /></label>
           <label>Destination<Input aria-label="Destination" value={draft.destinationLabel} onChange={(event) => set("destinationLabel", event.target.value)} placeholder="City" /></label>
-          <label>Destination PIN<Input aria-label="Destination PIN" value={draft.destinationPin} onChange={(event) => set("destinationPin", event.target.value)} placeholder="6-digit PIN" /></label>
+          <label>Destination PIN<Input aria-label="Destination PIN" value={draft.destinationPin} onChange={(event) => set("destinationPin", event.target.value)} placeholder="PIN or 3-digit zone" /></label>
           <label>Rate / kg<Input aria-label="Rate per kg" value={draft.ratePerKg} onChange={(event) => set("ratePerKg", event.target.value)} placeholder="1.2500" /></label>
           <label>Currency
             <select className="input" aria-label="Currency" value={draft.currency} onChange={(event) => set("currency", event.target.value)}>
@@ -90,6 +106,60 @@ export function FreightManagement() {
         <div className="modal-actions">
           <Button disabled={busy} onClick={() => void save()}>{editing ? "Save rule" : "Add rule"}</Button>
           {editing && <Button variant="secondary" onClick={() => { setEditing(null); setDraft(EMPTY); }}>Cancel edit</Button>}
+        </div>
+      </section>
+      <section className="section-block" style={{ marginBottom: 16, padding: 16 }}>
+        <p>Default rate per kg. Used for any destination when no lane or 3-digit PIN zone matches. This is not a distance.</p>
+        <div className="form-grid">
+          <label>INR rate / kg<Input aria-label="Default rate per kg" value={shownRate} onChange={(event) => setDefaultRate(event.target.value)} placeholder="1.0000" /></label>
+          <label>Minimum freight<Input aria-label="Default minimum freight" value={shownMinimum} onChange={(event) => setDefaultMinimum(event.target.value)} placeholder="Optional" /></label>
+          <label>Status
+            <select className="input" aria-label="Default active" value={shownActive ? "active" : "inactive"} onChange={(event) => setDefaultActive(event.target.value === "active")}>
+              <option value="active">Active</option>
+              <option value="inactive">Inactive</option>
+            </select>
+          </label>
+        </div>
+        <div className="modal-actions">
+          <Button variant="secondary" disabled={busy} onClick={() => void (async () => {
+            setBusy(true);
+            setError(null);
+            try {
+              await saveFreightDefault({ currency: "INR", ratePerKg: shownRate, minimumFreight: shownMinimum || null, isActive: shownActive });
+              defaults.reload();
+            } catch (cause) {
+              setError(getErrorMessage(cause));
+            } finally {
+              setBusy(false);
+            }
+          })()}>Save default rate</Button>
+        </div>
+      </section>
+      <section className="section-block" style={{ marginBottom: 16, padding: 16 }}>
+        <p>Distance rate per road kilometre. Used only when no saved lane or PIN zone matches, and only after a road distance is measured.</p>
+        <div className="form-grid">
+          <label>INR / km<Input aria-label="Distance rate per km" value={shownKmRate} onChange={(event) => setKmRate(event.target.value)} placeholder="2.0000" /></label>
+          <label>Minimum freight<Input aria-label="Distance minimum freight" value={shownKmMinimum} onChange={(event) => setKmMinimum(event.target.value)} placeholder="Optional" /></label>
+          <label>Status
+            <select className="input" aria-label="Distance rate active" value={shownKmActive ? "active" : "inactive"} onChange={(event) => setKmActive(event.target.value === "active")}>
+              <option value="active">Active</option>
+              <option value="inactive">Inactive</option>
+            </select>
+          </label>
+        </div>
+        <div className="modal-actions">
+          <Button variant="secondary" disabled={busy} onClick={() => void (async () => {
+            setBusy(true);
+            setError(null);
+            try {
+              await saveFreightDistanceRate({ currency: "INR", ratePerKm: shownKmRate, minimumFreight: shownKmMinimum || null, isActive: shownKmActive });
+              distanceRates.reload();
+            } catch (cause) {
+              setError(getErrorMessage(cause));
+            } finally {
+              setBusy(false);
+            }
+          })()}>Save distance rate</Button>
         </div>
       </section>
       <section className="section-block data-section">

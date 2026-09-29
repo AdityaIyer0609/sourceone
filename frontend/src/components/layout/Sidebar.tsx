@@ -39,7 +39,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
       </div>
       <div className="workspace-switcher">
         <div className="avatar avatar--square">{initials(session?.user.organisation ?? "SO")}</div>
-        <div><strong>{session?.user.organisation ?? "SourceOne"}</strong><small>{role}</small></div>
+        <div><strong>{session?.user.organisation ?? "Plenza"}</strong><small>{role}</small></div>
       </div>
       <nav className="nav-list" aria-label="Primary navigation">
         <small className="nav-kicker">COMMERCE</small>

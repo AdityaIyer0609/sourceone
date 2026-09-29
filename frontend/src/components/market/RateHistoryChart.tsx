@@ -55,7 +55,7 @@ export function RateHistoryChart({ history, range, now }: { history: BenchmarkHi
   if (!values.length) {
     return (
       <>
-        <div className="chart-area"><EmptyState icon={LineChart} title="No benchmark history in this range" message="No published SourceOne benchmark was in effect during this period." /></div>
+        <div className="chart-area"><EmptyState icon={LineChart} title="No benchmark history in this range" message="No published Plenza benchmark was in effect during this period." /></div>
         <div className="chart-stats">{statCells.map(([a, b]) => <span key={a}><small>{a}</small><strong>{b}</strong></span>)}</div>
       </>
     );
@@ -84,7 +84,7 @@ export function RateHistoryChart({ history, range, now }: { history: BenchmarkHi
     <>
       <div className="chart-area">
         <div className="chart-y">{yTicks.map((tick) => <span key={tick}>{money(tick.toFixed(4))}</span>)}</div>
-        <svg viewBox={`0 0 ${WIDTH} ${HEIGHT}`} preserveAspectRatio="none" aria-label={`${range} SourceOne benchmark history`}><defs><linearGradient id="chartFill" x1="0" x2="0" y1="0" y2="1"><stop offset="0%" stopColor="var(--accent)" stopOpacity=".18"/><stop offset="100%" stopColor="var(--accent)" stopOpacity="0"/></linearGradient></defs><path className="area-fill" d={area}/><path className="area-line" d={line}/></svg>
+        <svg viewBox={`0 0 ${WIDTH} ${HEIGHT}`} preserveAspectRatio="none" aria-label={`${range} Plenza benchmark history`}><defs><linearGradient id="chartFill" x1="0" x2="0" y1="0" y2="1"><stop offset="0%" stopColor="var(--accent)" stopOpacity=".18"/><stop offset="100%" stopColor="var(--accent)" stopOpacity="0"/></linearGradient></defs><path className="area-fill" d={area}/><path className="area-line" d={line}/></svg>
         <div className="chart-x">{xTicks.map((tick, i) => <span key={tick.getTime()}>{i === xTicks.length - 1 ? (range === "1D" ? "Now" : "Today") : formatShortDay(tick, range === "1D")}</span>)}</div>
       </div>
       <div className="chart-stats">{statCells.map(([a, b]) => <span key={a}><small>{a}</small><strong>{b}</strong></span>)}</div>
