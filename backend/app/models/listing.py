@@ -1,9 +1,10 @@
-"""A supplier's own offer to sell a catalogue product. This is not a SourceOne benchmark and not an ERP price."""
+"""A supplier's own offer to sell a catalogue product. Asking prices are not ERP prices and are not published benchmark rows."""
 
 import uuid
+from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import CheckConstraint, ForeignKey, Numeric, String, UniqueConstraint, true
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Integer, Numeric, String, UniqueConstraint, true
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, Timestamps, UUIDPrimaryKey
@@ -40,3 +41,20 @@ class SupplierListing(UUIDPrimaryKey, Timestamps, Base):
 
     supplier: Mapped[User] = relationship()
     product: Mapped[Product] = relationship()
+
+
+class AskingPriceAverage(UUIDPrimaryKey, Base):
+    """One point in the buyer-facing market rate: the average of active asking prices for a material."""
+
+    __tablename__ = "asking_price_averages"
+    __table_args__ = (
+        CheckConstraint("average_price > 0", name="average_positive"),
+        CheckConstraint("supplier_count > 0", name="supplier_count_positive"),
+        CheckConstraint(_in("currency", SUPPORTED_CURRENCIES), name="currency"),
+    )
+
+    product_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("products.id"), index=True)
+    currency: Mapped[str] = mapped_column(String(3))
+    average_price: Mapped[Decimal] = mapped_column(Numeric(18, 4))
+    supplier_count: Mapped[int] = mapped_column(Integer)
+    recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

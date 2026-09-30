@@ -1,6 +1,7 @@
 """Supplier listings and the buyers who can see them. Benchmarks are a different price."""
 
 import uuid
+from decimal import Decimal
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
@@ -18,6 +19,8 @@ from app.models.listing import SupplierListing
 from app.negotiation.constants import NegotiationPermission
 from app.pricing.constants import PricingPermission
 from app.schemas.listing import ListingActiveIn, ListingIn, ListingOut
+from app.schemas.supplier import SupplierMatchListOut
+from app.suppliers.matching import match_suppliers
 
 router = APIRouter(tags=["listings"])
 
@@ -29,9 +32,11 @@ def _out(listing: SupplierListing) -> ListingOut:
     return ListingOut(
         id=listing.id,
         product_code=listing.product.product_code,
+        product_name=listing.product.name,
         supplier_user_id=listing.supplier_user_id,
         supplier_name=listing.supplier.full_name,
         organisation=listing.supplier.organisation.name,
+        organisation_id=listing.supplier.organisation_id,
         origin_pin=listing.supplier.organisation.dispatch_pin,
         origin_label=listing.supplier.organisation.dispatch_label,
         uom=listing.uom,
@@ -67,11 +72,35 @@ def create_listing(body: ListingIn, db: DbSession, actor: Supplier):
     return _out(_loaded(db, listing.id))
 
 
+@router.get("/listings", response_model=list[ListingOut])
+def list_own_listings(db: DbSession, actor: Supplier):
+    return [_out(listing) for listing in service.own_listings(db, actor)]
+
+
 @router.patch("/listings/{listing_id}", response_model=ListingOut)
 def update_listing(listing_id: uuid.UUID, body: ListingActiveIn, db: DbSession, actor: Supplier):
-    listing = service.set_listing_active(db, actor, listing_id, is_active=body.is_active)
+    listing = service.update_listing(
+        db, actor, listing_id, is_active=body.is_active, asking_price=body.asking_price,
+        minimum_quantity=body.minimum_quantity, availability=body.availability,
+    )
     db.commit()
     return _out(_loaded(db, listing.id))
+
+
+@router.get("/products/{product_code}/supplier-matches", response_model=SupplierMatchListOut)
+def match_product_suppliers(
+    product_code: str,
+    db: DbSession,
+    _: Viewer,
+    quantity: Annotated[Decimal, Query(gt=0)],
+    uom: Annotated[str, Query(min_length=1)],
+    destination_pin: Annotated[str, Query(alias="destinationPin", min_length=6, max_length=6)],
+    currency: Annotated[str | None, Query()] = None,
+):
+    return match_suppliers(
+        db, product_code=product_code, quantity=quantity, uom=uom,
+        destination_pin=destination_pin, currency=currency,
+    )
 
 
 @router.get("/products/{product_code}/listings", response_model=list[ListingOut])

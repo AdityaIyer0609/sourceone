@@ -1,7 +1,8 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { ApiError, getErrorMessage } from "../../lib/api/client";
+import { estimateFreight, shownFreight, type FreightBasis, type FreightEstimate } from "../../lib/api/freight";
 import type { NegotiationSupplier, OfferInput } from "../../lib/api/negotiations";
-import { BENCHMARK_GLYPH } from "../../lib/pricingFormat";
+import { BENCHMARK_GLYPH, formatMoney } from "../../lib/pricingFormat";
 import { ProductVisual } from "../product/ProductVisual";
 import { Button, Input, Modal } from "../ui";
 
@@ -15,6 +16,8 @@ export function OfferModal({
   initialQuantity,
   submitLabel,
   suppliers,
+  productCode,
+  initialPin = "",
   onClose,
   onSubmit,
 }: {
@@ -26,8 +29,10 @@ export function OfferModal({
   initialQuantity: string;
   submitLabel: string;
   suppliers?: NegotiationSupplier[];
+  productCode?: string;
+  initialPin?: string;
   onClose: () => void;
-  onSubmit: (input: OfferInput & { quantity: string; supplierUserId?: string }) => Promise<void>;
+  onSubmit: (input: OfferInput & { quantity: string; supplierUserId?: string; destinationPin?: string; freightBasis?: FreightBasis }) => Promise<void>;
 }) {
   const [quantity, setQuantity] = useState(initialQuantity);
   const [price, setPrice] = useState(suppliers?.[0]?.askingPrice ?? "");
@@ -38,9 +43,33 @@ export function OfferModal({
     const asking = suppliers?.find((supplier) => supplier.id === id)?.askingPrice;
     if (asking) setPrice(asking);
   };
+  const [pin, setPin] = useState(initialPin);
+  const [basis, setBasis] = useState<FreightBasis>("standard");
+  const [estimate, setEstimate] = useState<FreightEstimate | null>(null);
+  const [estimating, setEstimating] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
-  const valid = Number(quantity) > 0 && Number(price) > 0 && (!suppliers || Boolean(supplierId));
+  const needsFreight = Boolean(suppliers);
+  const pinOk = /^[1-9][0-9]{5}$/.test(pin);
+  const valid = Number(quantity) > 0 && Number(price) > 0 && (!suppliers || Boolean(supplierId)) && (!needsFreight || pinOk);
+  useEffect(() => {
+    if (!needsFreight || !pinOk || !productCode || !supplierId || !(Number(quantity) > 0)) {
+      setEstimate(null);
+      return;
+    }
+    let cancelled = false;
+    setEstimating(true);
+    estimateFreight({ supplierUserId: supplierId, productCode, quantity, destinationPin: pin }).then((result) => {
+      if (!cancelled) setEstimate(result);
+    }).catch(() => {
+      if (!cancelled) setEstimate(null);
+    }).finally(() => {
+      if (!cancelled) setEstimating(false);
+    });
+    return () => { cancelled = true; };
+  }, [needsFreight, pinOk, productCode, supplierId, quantity, pin]);
+  const shown = estimate ? shownFreight(estimate, basis) : null;
+  const freightText = !pinOk ? "Enter a delivery PIN" : estimating ? "Calculating…" : shown?.status === "estimated" && shown.freight ? formatMoney(shown.freight) : "Freight on request";
 
   const submit = async () => {
     setBusy(true);
@@ -51,6 +80,8 @@ export function OfferModal({
         offeredPrice: price,
         message: message.trim() || undefined,
         supplierUserId: suppliers ? supplierId : undefined,
+        destinationPin: needsFreight ? pin : undefined,
+        freightBasis: needsFreight ? basis : undefined,
       });
     } catch (caught) {
       setError(caught);
@@ -72,6 +103,17 @@ export function OfferModal({
         <span><small>Quantity ({uom})</small><strong><Input inputMode="decimal" value={quantity} onChange={(event) => setQuantity(event.target.value)} aria-label="Quantity" /></strong></span>
         <span><small>Offered price ({currency} / {uom.toLowerCase()})</small><strong><Input inputMode="decimal" value={price} placeholder="0.00" onChange={(event) => setPrice(event.target.value)} aria-label="Offered price" /></strong></span>
       </div>
+      {needsFreight && (
+        <div className="order-delivery">
+          <label>Delivery PIN<Input value={pin} inputMode="numeric" aria-label="Delivery PIN" placeholder="6-digit PIN" onChange={(event) => setPin(event.target.value)} /></label>
+          <div className="freight-basis" role="group" aria-label="Freight basis">
+            <Button variant="ghost" className={`filter-chip${basis === "standard" ? " is-active" : ""}`} onClick={() => setBasis("standard")}>Normal freight</Button>
+            <Button variant="ghost" className={`filter-chip${basis === "distance" ? " is-active" : ""}`} onClick={() => setBasis("distance")}>Road distance</Button>
+          </div>
+          <div className="order-freight"><small>Estimated freight{shown?.label ? ` · ${shown.label}` : ""}</small><strong>{freightText}</strong></div>
+          <p className="order-note">Freight is for this supplier and this delivery PIN. It is not part of the offered price or the benchmark.</p>
+        </div>
+      )}
       <Input value={message} placeholder="Message to the other party (optional)" onChange={(event) => setMessage(event.target.value)} aria-label="Message" />
       {error ? <p className="negative" role="alert">{getErrorMessage(error)}{error instanceof ApiError && error.code ? ` (${error.code})` : ""}</p> : null}
       <div className="modal-actions">

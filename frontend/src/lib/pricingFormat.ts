@@ -78,6 +78,34 @@ export function previewOrderTotal(quantity: string, unitPrice: Money): Money {
   return { amount: `${cents / 100n}.${(cents % 100n).toString().padStart(2, '0')}`, currency: unitPrice.currency }
 }
 
+/** Supplier asking prices are quoted GST extra. Plastics are charged at 18%. */
+export const GST_RATE_PERCENT = 18
+
+function toCents(amount: string) {
+  const scaled = toScaled(amount)
+  const divisor = 10n ** BigInt(scaled.scale)
+  let cents = (scaled.digits * 100n) / divisor
+  if (scaled.scale > 2 && ((scaled.digits * 100n) % divisor) * 2n >= divisor) cents += 1n
+  return cents
+}
+
+function fromCents(cents: bigint, currency: string): Money {
+  return { amount: `${cents / 100n}.${(cents % 100n).toString().padStart(2, '0')}`, currency }
+}
+
+/** Payable amount = negotiated material + estimated freight, then 18% GST on that sum. */
+export function orderCharges(material: Money, freight: Money | null) {
+  const materialCents = toCents(material.amount)
+  const freightCents = freight ? toCents(freight.amount) : 0n
+  const base = materialCents + freightCents
+  let gst = (base * BigInt(GST_RATE_PERCENT)) / 100n
+  if (((base * BigInt(GST_RATE_PERCENT)) % 100n) * 2n >= 100n) gst += 1n
+  return {
+    gst: fromCents(gst, material.currency),
+    payable: fromCents(base + gst, material.currency),
+  }
+}
+
 /** Catalogue glyph for benchmark series; all current SourceOne series are polymers. */
 export const BENCHMARK_GLYPH = 'RESIN'
 

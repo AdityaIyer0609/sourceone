@@ -35,7 +35,7 @@ export function LiveRatesPage() {
   return (
     <div className="page">
       <div className="page-heading">
-        <div><small>MARKET INTELLIGENCE</small><Heading level={1}>Live rate desk</Heading><p>Auditable benchmark pricing across primary industrial material markets.</p></div>
+        <div><small>MARKET INTELLIGENCE</small><Heading level={1}>Live rate desk</Heading><p>Each rate is the average of supplier asking prices for that material. The graph moves when that average changes. Freight is calculated after a supplier is chosen.</p></div>
         <div className="market-open"><span className="live-dot" /><div><strong>{liveCount} of {benchmarks.length} benchmarks live</strong><small>{updatedAt ? `Last refresh ${formatClock(updatedAt)}` : "Refreshing…"}</small></div></div>
       </div>
       <AsyncContent isLoading={isLoading && !benchmarks.length} error={error} onRetry={reload} isEmpty={!benchmarks.length} emptyTitle="No benchmarks published yet" loadingLabel="Loading Plenza benchmarks…">
@@ -64,6 +64,7 @@ export function LiveRatesPage() {
                   {selected.current ? (
                     <>
                       {formatMoney(selected.current.value)} / {selected.unit.label} · as of {formatDate(selected.current.freshness.asOfDate)}{" "}
+                      {selected.spread.state === "ok" && selected.spread.minimum && selected.spread.maximum ? ` · spread ${formatMoney(selected.spread.minimum)}–${formatMoney(selected.spread.maximum)} across ${selected.spread.askCount} asks` : selected.spread.askCount === 1 ? " · one ask, spread unavailable" : ""}{" "}
                       {selectedDirection && selected.movement.absolute && <span className={selectedDirection === "down" ? "negative" : "positive"}>{formatSignedMoney(selected.movement.absolute)} vs previous</span>}
                     </>
                   ) : "Rate on request"}

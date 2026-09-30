@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends
 from app.api.deps import DbSession, require_any
 from app.api.v1 import pricing_presenters as present
 from app.catalogue import listings as catalogue_listings
+from app.catalogue import market_average
 from app.catalogue import products as catalogue
 from app.catalogue.specifications import specification_rows
 from app.core.clock import utcnow
@@ -27,9 +28,13 @@ def _present(products: list[Product], db: DbSession) -> list[schemas.ProductOut]
     now = utcnow()
     out = []
     for product in products:
-        pricing = [
-            present.benchmark_summary(s, timelines.get(s.id, []), now) for s in series_by_product[product.id]
-        ]
+        pricing = []
+        for series in series_by_product[product.id]:
+            summary = present.benchmark_summary(series, timelines.get(series.id, []), now)
+            market = market_average.view(db, [product.id], series.currency)
+            if market is not None:
+                summary = present.apply_market_average(summary, market, now)
+            pricing.append(summary)
         default = pricing[0] if pricing else None
         out.append(schemas.ProductOut(
             product_code=product.product_code,

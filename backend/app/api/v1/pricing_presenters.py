@@ -1,21 +1,40 @@
 """Maps pricing models and read-model results onto API contracts."""
 
-from datetime import datetime
+import uuid
+from datetime import datetime, timedelta
 from decimal import Decimal
 
 from sqlalchemy.orm import Session
 
+from app.catalogue.market_average import STALE_AFTER_DAYS, AveragePoint, MarketView, gap
+from app.core.clock import business_today
 from app.core.config import get_settings
 from app.models.catalogue import Grade, Market, Producer
 from app.models.pricing import BenchmarkRate, RateSeries, RateSource, SourceRate
 from app.pricing import read_model, repository
 from app.pricing.constants import (
+    HISTORY_RANGES_DAYS,
     PRICE_BASIS_LABELS,
     TAX_BASIS_LABELS,
     UNIT_LABELS,
     label_for,
 )
+from app.pricing.read_model import PERCENT_QUANTUM, compute_stats
 from app.schemas import pricing as schemas
+
+
+def quote_position(
+    offered: Decimal | None, snapshot: Decimal | None, average: Decimal | None, currency: str | None,
+) -> schemas.QuotePositionOut:
+    versus_snapshot = gap(offered, snapshot)
+    versus_average = gap(offered, average)
+    return schemas.QuotePositionOut(
+        offered_price=money(offered, currency),
+        snapshot=money(snapshot, currency),
+        current_average=money(average, currency),
+        versus_snapshot=money(versus_snapshot, currency),
+        versus_average=money(versus_average, currency),
+    )
 
 
 def money(amount: Decimal | None, currency: str | None) -> schemas.Money | None:
@@ -94,6 +113,94 @@ def benchmark_summary(series: RateSeries, timeline: list[BenchmarkRate], now: da
         movement=movement_out,
         sparkline=schemas.SparklineOut(range="7D", state=sparkline.state, points=points),
         **_codes(series),
+    )
+
+
+def _point_id(summary: schemas.BenchmarkSummaryOut, market: MarketView) -> uuid.UUID:
+    if market.points:
+        return market.points[-1].point_id
+    if summary.current is not None:
+        return summary.current.benchmark_id
+    return uuid.uuid5(uuid.NAMESPACE_URL, f"asking-average:{summary.series_code}:{summary.currency}")
+
+
+def apply_market_average(summary: schemas.BenchmarkSummaryOut, market: MarketView, now: datetime) -> schemas.BenchmarkSummaryOut:
+    """Replace a published series value with the average of supplier asking prices."""
+    if market.kind != "average" or market.average is None or market.as_of is None:
+        summary.availability = "rate_on_request"
+        summary.unavailable_reason = "no_benchmark"
+        summary.current = None
+        summary.movement = schemas.MovementOut(state="insufficient_data")
+        summary.sparkline = schemas.SparklineOut(range="7D", state="insufficient_data", points=[])
+        return summary
+    point_id = _point_id(summary, market)
+    summary.availability = "available"
+    summary.unavailable_reason = None
+    summary.current = schemas.CurrentOut(
+        benchmark_id=point_id,
+        value=money(market.average, summary.currency),
+        effective_from=market.as_of,
+        published_at=market.as_of,
+        freshness=schemas.FreshnessOut(
+            state="fresh",
+            as_of_date=business_today(market.as_of),
+            stale_after=now + timedelta(days=STALE_AFTER_DAYS),
+        ),
+    )
+    if market.previous is None:
+        summary.movement = schemas.MovementOut(state="insufficient_data")
+    else:
+        absolute = (market.average - market.previous).quantize(Decimal("0.0001"))
+        percent = (absolute / market.previous * 100).quantize(PERCENT_QUANTUM)
+        previous_at = market.points[-2].at if len(market.points) >= 2 else market.as_of
+        summary.movement = schemas.MovementOut(
+            state="ok",
+            previous_value=money(market.previous, summary.currency),
+            previous_as_of_date=business_today(previous_at),
+            absolute=money(absolute, summary.currency),
+            percent=f"{percent:.2f}",
+        )
+    start = now - timedelta(days=7)
+    spark = [point for point in market.points if point.at >= start]
+    if not spark:
+        spark = [AveragePoint(market.as_of, market.average, point_id)]
+    summary.sparkline = schemas.SparklineOut(
+        range="7D",
+        state="ok",
+        points=[schemas.PointOut(at=point.at, value=f"{point.value:.4f}", benchmark_id=point.point_id) for point in spark],
+    )
+    if market.spread_min is not None and market.spread_max is not None:
+        summary.spread = schemas.SpreadOut(
+            state="ok",
+            minimum=money(market.spread_min, summary.currency),
+            maximum=money(market.spread_max, summary.currency),
+            ask_count=market.supplier_count,
+        )
+    else:
+        summary.spread = schemas.SpreadOut(state="unavailable", ask_count=market.supplier_count)
+    return summary
+
+
+def market_history(series: RateSeries, market: MarketView, range_code: str, now: datetime) -> schemas.HistoryOut:
+    start = now - timedelta(days=HISTORY_RANGES_DAYS[range_code])
+    stored = list(market.points)
+    if market.kind == "average" and market.average is not None and (not stored or stored[-1].value != market.average):
+        stored.append(AveragePoint(market.as_of or now, market.average, stored[-1].point_id if stored else series.id))
+    carry = [point for point in stored if point.at < start]
+    inside = [point for point in stored if point.at >= start]
+    carry_in = carry[-1] if carry else None
+    values = ([carry_in.value] if carry_in else []) + [point.value for point in inside]
+    stats = compute_stats(values, min_points=1, volatility_min_points=get_settings().pricing_volatility_min_points)
+    return schemas.HistoryOut(
+        series_code=series.code,
+        range=range_code,
+        currency=series.currency,
+        unit=series.unit,
+        state=stats.state if values else "insufficient_data",
+        carry_in=schemas.PointOut(at=carry_in.at, value=f"{carry_in.value:.4f}", benchmark_id=carry_in.point_id) if carry_in else None,
+        points=[schemas.PointOut(at=point.at, value=f"{point.value:.4f}", benchmark_id=point.point_id) for point in inside],
+        gaps=[],
+        stats=_stats(stats),
     )
 
 

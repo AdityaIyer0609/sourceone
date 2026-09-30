@@ -8,6 +8,7 @@ import { NegotiationsPage } from '../pages/NegotiationsPage'
 import { NotFoundPage } from '../pages/NotFoundPage'
 import { OperationsPage } from '../pages/operations/OperationsPage'
 import { ProductDetailPage } from '../pages/ProductDetailPage'
+import { SupplierProfilePage } from '../pages/SupplierProfilePage'
 import type { RouteHandle } from './paths'
 
 const title = (value: string): RouteHandle => ({ title: value })
@@ -25,6 +26,7 @@ export const router = createBrowserRouter([
           { index: true, element: <MarketplacePage />, handle: title('Marketplace') },
           { path: 'catalogue', element: <CataloguePage />, handle: title('Catalogue') },
           { path: 'catalogue/:sku', element: <ProductDetailPage />, handle: title('Product Detail') },
+          { path: 'suppliers/:organisationId', element: <SupplierProfilePage />, handle: title('Supplier') },
           { path: 'live-rates', element: <LiveRatesPage />, handle: title('Live Rates') },
           { path: 'freight-calculator', element: <OperationsPage screen="Freight Calculator" />, handle: title('Freight Calculator') },
           { path: 'purchase-requests', element: <OperationsPage screen="Purchase Requests" />, handle: title('Purchase Requests') },
@@ -33,10 +35,14 @@ export const router = createBrowserRouter([
           { path: 'order-tracking', element: <OperationsPage screen="Order Tracking" />, handle: title('Order Tracking') },
           { path: 'reorder', element: <OperationsPage screen="Reorder" />, handle: title('Reorder') },
           { path: 'dashboard', element: <OperationsPage screen="Dashboard" />, handle: title('Dashboard') },
+          { path: 'supplier', element: <OperationsPage screen="Supplier Home" />, handle: title('Supplier') },
+          { path: 'listings', element: <OperationsPage screen="Listings" />, handle: title('Listings') },
           { path: 'admin/item-master', element: <OperationsPage screen="Item Master" />, handle: title('Item Master') },
           { path: 'admin/rate-management', element: <OperationsPage screen="Rate Management" />, handle: title('Rate Management') },
           { path: 'admin/freight', element: <OperationsPage screen="Freight Management" />, handle: title('Freight') },
           { path: 'admin/users', element: <OperationsPage screen="User Management" />, handle: title('User Management') },
+          { path: 'approvals', element: <OperationsPage screen="Approvals" />, handle: title('Approvals') },
+          { path: 'company', element: <OperationsPage screen="Company" />, handle: title('Company') },
           { path: '*', element: <NotFoundPage />, handle: title('Not Found') },
         ],
       },

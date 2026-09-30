@@ -10,6 +10,8 @@ class AdminUserOut(ApiModel):
     full_name: str
     email: str
     organisation: str
+    organisation_id: uuid.UUID
+    organisation_type: str
     roles: list[str]
     is_active: bool
     is_system: bool
@@ -20,6 +22,7 @@ class AdminUserIn(ApiModel):
     email: str = Field(min_length=3, max_length=320)
     password: str = Field(min_length=8, max_length=200)
     role: str
+    organisation_id: uuid.UUID | None = None
 
 
 class UserActiveIn(ApiModel):

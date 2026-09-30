@@ -1,5 +1,5 @@
 import { apiClient } from './client'
-import type { Money } from './pricing'
+import type { Money, QuotePosition } from './pricing'
 
 export type RequestStatus = 'draft' | 'sent' | 'in_negotiation' | 'converted' | 'cancelled'
 
@@ -7,12 +7,26 @@ export interface RequestSupplier {
   supplierUserId: string
   supplierName: string
   organisation: string
+  organisationId: string
   negotiationId: string | null
   negotiationNumber: string | null
   negotiationStatus: string | null
   askingPrice: Money | null
+  latestOffer: Money | null
+  materialValue: Money | null
   freightStatus: 'estimated' | 'on_request'
   freight: Money | null
+  landedEstimate: Money | null
+  charges: {
+    material: Money
+    freight: Money | null
+    gstRatePercent: 18
+    gstBasis: string
+    gst: Money
+    payable: Money
+  } | null
+  quote: QuotePosition
+  requirementResponses: { key: string; status: 'met' | 'not_met'; comment: string | null }[]
 }
 
 export interface PurchaseRequest {
@@ -24,6 +38,10 @@ export interface PurchaseRequest {
   quantity: string
   uom: string
   destinationPin: string
+  freightBasis: 'standard' | 'distance'
+  requiredBy: string | null
+  paymentTerms: string | null
+  requirements: { key: string; label: string; value: string }[] | null
   message: string | null
   buyerName: string
   buyerOrganisation: string
@@ -40,6 +58,9 @@ export interface PurchaseRequestInput {
   quantity: string
   uom: string
   destinationPin: string
+  freightBasis?: 'standard' | 'distance'
+  requiredBy?: string
+  paymentTerms?: string
   message?: string
   supplierUserIds?: string[]
 }

@@ -46,7 +46,7 @@ def test_previous_order_appears(client, world, product):
     assert row["quantity"] == "12000.5" and row["uom"] == "KG"
     assert row["previousPrice"] == {"amount": "98.7500", "currency": "INR"}
     assert row["currentAskingPrice"] == {"amount": "100.2500", "currency": "INR"}
-    assert row["currentBenchmark"] == {"amount": "99.4000", "currency": "INR"}
+    assert row["currentBenchmark"] == {"amount": "100.2500", "currency": "INR"}
     assert row["available"] is True and row["orderedAt"]
 
 
@@ -101,7 +101,7 @@ def test_reorder_creates_a_new_negotiation_at_the_current_asking_price(client, w
     body = started.json()
     assert body["offeredPrice"] == {"amount": "100.2500", "currency": "INR"}
     assert body["previousPrice"] == {"amount": "98.7500", "currency": "INR"}
-    assert body["currentBenchmark"] == {"amount": "99.4000", "currency": "INR"}
+    assert body["currentBenchmark"] == {"amount": "100.2500", "currency": "INR"}
     assert body["quantity"] == "8000" and body["freightStatus"] == "on_request"
     negotiation = world.session.get(Negotiation, body["negotiationId"])
     assert negotiation.id != order.negotiation_id

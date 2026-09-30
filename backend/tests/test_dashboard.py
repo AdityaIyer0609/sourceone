@@ -16,8 +16,14 @@ def test_dashboard_with_no_activity(client, world):
     body = client.get(DASHBOARD, headers=as_user(world, "buyer")).json()
     assert body["activeOrders"] == 0
     assert body["openNegotiations"] == 0
+    assert body["openRequests"] == 0
     assert body["pendingActions"] == 0
+    assert body["spendBasis"] == "material"
     assert body["spend"] == []
+    assert body["spendByProduct"] == [] and body["spendBySupplier"] == []
+    assert body["variance"] == []
+    assert body["delivery"]["available"] is False
+    assert body["alerts"] == []
     assert body["ordersByStatus"] == {}
     assert body["recentOrders"] == [] and body["recentNegotiations"] == []
 
@@ -43,6 +49,15 @@ def test_dashboard_orders_spend_and_recent_status(client, world, product):
     assert recent["valueKind"] == "order_total"
     assert recent["value"] == {"amount": order["totalValue"]["amount"], "currency": "INR"}
     assert recent["canReorder"] is True
+    [variance] = body["variance"]
+    agreed = Decimal(variance["agreedUnitPrice"]["amount"])
+    snapshot = Decimal(variance["snapshot"]["amount"])
+    assert variance["orderNumber"] == order["orderNumber"]
+    assert Decimal(variance["unitDifference"]["amount"]) == agreed - snapshot
+    assert body["spendByProduct"] == [{
+        "label": product.name, "currency": "INR", "amount": order["totalValue"]["amount"], "orderCount": 1,
+    }]
+    assert body["delivery"]["available"] is False
 
 
 def test_spend_keeps_currencies_separate_and_skips_cancelled(client, world, product):
@@ -64,7 +79,11 @@ def test_spend_keeps_currencies_separate_and_skips_cancelled(client, world, prod
     countered = _offer(client, world, "supplier", started.json()["id"], "1.2000", quantity="100")
     assert countered.status_code == 201, countered.text
     assert client.post(f"/api/v1/negotiations/{started.json()['id']}/accept", headers=as_user(world, "buyer")).status_code == 200
-    usd_order = client.post(f"/api/v1/orders/from-negotiation/{started.json()['id']}", headers=as_user(world, "buyer"))
+    usd_order = client.post(
+        f"/api/v1/orders/from-negotiation/{started.json()['id']}",
+        json={"destinationPin": "560076"},
+        headers=as_user(world, "buyer"),
+    )
     assert usd_order.status_code == 201, usd_order.text
 
     spend = client.get(DASHBOARD, headers=as_user(world, "buyer")).json()["spend"]
@@ -91,3 +110,39 @@ def test_open_negotiations_and_pending_actions(client, world, product):
     assert ready["pendingActions"] == 1
     assert ready["recentNegotiations"][0]["status"] == "countered"
     assert ready["recentNegotiations"][0]["value"]["amount"] == "97.5000"
+    assert waiting["alerts"] == []
+    [alert] = ready["alerts"]
+    assert alert["kind"] == "negotiation"
+    assert alert["id"] == started.json()["id"]
+
+
+def test_open_request_and_variance_omitted_without_snapshot(client, world, product):
+    created = client.post("/api/v1/purchase-requests", json={
+        "productCode": product.product_code, "quantity": "1000", "uom": "KG", "destinationPin": "560076",
+    }, headers=as_user(world, "buyer"))
+    assert created.status_code == 201, created.text
+    assert client.get(DASHBOARD, headers=as_user(world, "buyer")).json()["openRequests"] == 1
+
+    unpriced = catalogue.create_product(
+        world.session, product_code=f"ROR-{world.suffix}", name="Unpriced resin",
+        category=f"cat-{world.suffix}", uom="KG",
+    )
+    world.session.flush()
+    started = client.post("/api/v1/negotiations", json={
+        "productCode": unpriced.product_code, "quantity": "10", "currency": "INR", "offeredPrice": "80.0000",
+        "supplierUserId": str(world.users["supplier"].id),
+    }, headers=as_user(world, "buyer"))
+    assert started.status_code == 201, started.text
+    assert started.json()["benchmark"]["value"] is None
+    countered = _offer(client, world, "supplier", started.json()["id"], "81.0000", quantity="10")
+    assert countered.status_code == 201, countered.text
+    assert client.post(f"/api/v1/negotiations/{started.json()['id']}/accept", headers=as_user(world, "buyer")).status_code == 200
+    placed = client.post(
+        f"/api/v1/orders/from-negotiation/{started.json()['id']}",
+        json={"destinationPin": "560076"},
+        headers=as_user(world, "buyer"),
+    )
+    assert placed.status_code == 201, placed.text
+    body = client.get(DASHBOARD, headers=as_user(world, "buyer")).json()
+    assert placed.json()["orderNumber"] not in {row["orderNumber"] for row in body["variance"]}
+    assert body["spendBySupplier"][0]["orderCount"] == 1

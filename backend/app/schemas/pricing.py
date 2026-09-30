@@ -16,6 +16,36 @@ class Money(ApiModel):
     currency: str
 
 
+class SpreadOut(ApiModel):
+    """Min and max of the current asking prices behind an average. Unavailable below two asks."""
+
+    state: Literal["ok", "unavailable"]
+    minimum: Money | None = None
+    maximum: Money | None = None
+    ask_count: int = 0
+
+
+class QuotePositionOut(ApiModel):
+    """How an offer sits against the frozen snapshot and the live asking average. Not a stored price."""
+
+    offered_price: Money | None
+    snapshot: Money | None
+    current_average: Money | None
+    versus_snapshot: Money | None = None
+    versus_average: Money | None = None
+
+
+class ChargeOut(ApiModel):
+    """Estimate beside a price. Not stored as the negotiated or order total."""
+
+    material: Money
+    freight: Money | None
+    gst_rate_percent: Literal[18]
+    gst_basis: str
+    gst: Money
+    payable: Money
+
+
 class CodeLabel(ApiModel):
     code: str
     label: str
@@ -94,6 +124,7 @@ class BenchmarkSummaryOut(ApiModel):
     current: CurrentOut | None = None
     movement: MovementOut
     sparkline: SparklineOut
+    spread: SpreadOut = Field(default_factory=lambda: SpreadOut(state="unavailable"))
 
 
 class SpecificationOut(ApiModel):

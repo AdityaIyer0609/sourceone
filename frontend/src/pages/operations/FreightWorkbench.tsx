@@ -1,5 +1,6 @@
 import { ArrowRight, Truck } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { onDeliveryPinChange, readDeliveryPin } from "../../lib/deliveryPin";
 import { Badge, Button, Input } from "../../components/ui";
 import { getErrorMessage } from "../../lib/api/client";
 import { estimateFreight, shownFreight, type FreightBasis, type FreightEstimate } from "../../lib/api/freight";
@@ -13,7 +14,8 @@ export function FreightWorkbench() {
   const [productCode, setProductCode] = useState("");
   const [supplierId, setSupplierId] = useState("");
   const [quantity, setQuantity] = useState("5000");
-  const [destinationPin, setDestinationPin] = useState("");
+  const [destinationPin, setDestinationPin] = useState(readDeliveryPin);
+  useEffect(() => onDeliveryPinChange(() => setDestinationPin(readDeliveryPin())), []);
   const [estimate, setEstimate] = useState<FreightEstimate | null>(null);
   const [basis, setBasis] = useState<FreightBasis>("standard");
   const [error, setError] = useState<string | null>(null);

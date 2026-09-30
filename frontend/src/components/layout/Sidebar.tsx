@@ -1,6 +1,6 @@
 import { Settings2, Sparkles, X } from "lucide-react";
 import { NavLink } from "react-router-dom";
-import { commerceNav, controlCentreNav, type NavItem } from "../../app/navigation";
+import { commerceNav, controlCentreNav, visibleNav, type NavItem } from "../../app/navigation";
 import { paths } from "../../app/paths";
 import { clearSession, readSession } from "../../lib/api/auth";
 import { listNegotiations } from "../../lib/api/negotiations";
@@ -27,10 +27,13 @@ function initials(name: string) {
 export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void }) {
   const session = readSession();
   const name = session?.user.fullName ?? "Signed in";
-  const role = session?.user.roles[0]?.replace(/_/g, " ") ?? "Account";
-  const negotiations = useApiQuery("nav-negotiations", (signal) => listNegotiations(signal));
+  const roles = session?.user.roles ?? [];
+  const role = roles[0]?.replace(/_/g, " ") ?? "Account";
+  const commerce = visibleNav(commerceNav, roles);
+  const control = visibleNav(controlCentreNav, roles);
+  const negotiations = useApiQuery(commerce.some((item) => item.to === paths.negotiations) ? "nav-negotiations" : null, (signal) => listNegotiations(signal));
   const openNegotiations = (negotiations.data ?? []).filter((item) => OPEN_NEGOTIATION.has(item.status)).length;
-  const nav = commerceNav.map((item) => item.to === paths.negotiations && openNegotiations > 0 ? { ...item, badge: openNegotiations } : item);
+  const nav = commerce.map((item) => item.to === paths.negotiations && openNegotiations > 0 ? { ...item, badge: openNegotiations } : item);
   return (
     <aside className={`sidebar ${open ? "is-open" : ""}`}>
       <div className="sidebar__top">
@@ -44,8 +47,8 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
       <nav className="nav-list" aria-label="Primary navigation">
         <small className="nav-kicker">COMMERCE</small>
         {nav.map((item) => <SidebarLink key={item.to} item={item} onNavigate={onClose} />)}
-        <small className="nav-kicker nav-kicker--spaced">CONTROL CENTRE</small>
-        {controlCentreNav.map((item) => <SidebarLink key={item.to} item={item} onNavigate={onClose} />)}
+        {control.length > 0 && <small className="nav-kicker nav-kicker--spaced">CONTROL CENTRE</small>}
+        {control.map((item) => <SidebarLink key={item.to} item={item} onNavigate={onClose} />)}
       </nav>
       <div className="sidebar__support">
         <div className="support-icon"><Sparkles size={18} /></div>

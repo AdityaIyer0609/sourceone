@@ -1,12 +1,12 @@
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Literal
 
 from pydantic import Field
 
-from app.schemas.negotiation import PartyOut
-from app.schemas.pricing import ApiModel, Money
+from app.schemas.negotiation import PartyOut, RequirementOut
+from app.schemas.pricing import ApiModel, ChargeOut, Money
 
 
 class OrderProductOut(ApiModel):
@@ -33,16 +33,38 @@ class OrderActionsOut(ApiModel):
     cancel: bool
 
 
+class CreateOrderIn(ApiModel):
+    destination_pin: str = Field(min_length=6, max_length=6)
+    freight_basis: Literal["standard", "distance"] = "standard"
+
+
+class OrderDocumentOut(ApiModel):
+    id: uuid.UUID
+    document_type: str
+    filename: str
+    status: Literal["submitted", "accepted", "rejected"]
+    byte_size: int
+
+
+class DocumentReviewIn(ApiModel):
+    status: Literal["accepted", "rejected"]
+
+
 class OrderOut(ApiModel):
     id: uuid.UUID
     order_number: str
-    status: Literal["placed", "confirmed", "processing", "ready", "dispatched", "delivered", "cancelled"]
+    status: Literal["placed", "confirmed", "processing", "ready", "dispatched", "in_transit", "delivered", "cancelled"]
     product: OrderProductOut
     quantity: str
     uom: str
     currency: str
     agreed_price: AgreedPriceOut
     total_value: Money
+    charges: ChargeOut
+    destination_pin: str | None = None
+    freight_status: Literal["estimated", "on_request"] | None = None
+    freight: Money | None = None
+    freight_match: Literal["lane", "zone", "default", "distance"] | None = None
     negotiation: NegotiationRefOut
     buyer: PartyOut
     supplier: PartyOut
@@ -52,9 +74,33 @@ class OrderOut(ApiModel):
     updated_at: datetime
     cancelled_at: datetime | None
     cancel_reason: str | None
+    requirements: list[RequirementOut] = []
+    documents: list[OrderDocumentOut] = []
 
 
-OrderStatusName = Literal["placed", "confirmed", "processing", "ready", "dispatched", "delivered", "cancelled"]
+OrderStatusName = Literal["placed", "confirmed", "processing", "ready", "dispatched", "in_transit", "delivered", "cancelled"]
+
+
+class ShipmentOut(ApiModel):
+    """Facts the supplier entered. Coordinates are not part of this record."""
+
+    lr_number: str | None = None
+    transporter: str | None = None
+    vehicle: str | None = None
+    eta: date | None = None
+
+
+class ShipmentIn(ApiModel):
+    lr_number: str | None = Field(default=None, max_length=40)
+    transporter: str | None = Field(default=None, max_length=80)
+    vehicle: str | None = Field(default=None, max_length=40)
+    eta: date | None = None
+
+
+class PodLinkOut(ApiModel):
+    id: uuid.UUID
+    filename: str
+    status: Literal["submitted", "accepted", "rejected"]
 
 
 class TrackingStepOut(ApiModel):
@@ -90,9 +136,13 @@ class TrackingOut(ApiModel):
     steps: list[TrackingStepOut]
     events: list[StatusEventOut]
     last_updated_at: datetime
+    shipment: ShipmentOut
+    required_by: date | None = None
+    delayed: bool
+    pod: PodLinkOut | None = None
 
 
-class StatusChangeIn(ApiModel):
+class StatusChangeIn(ShipmentIn):
     to_status: OrderStatusName
     note: str | None = Field(default=None, max_length=2000)
 
@@ -110,6 +160,7 @@ class ReorderItemOut(ApiModel):
     supplier_user_id: uuid.UUID
     supplier_name: str
     organisation: str
+    organisation_id: uuid.UUID
     quantity: str
     uom: str
     currency: str

@@ -75,11 +75,93 @@ def test_send_opens_a_negotiation_and_does_not_create_an_order(client, world, pr
     assert refreshed["status"] == "in_negotiation"
     accepted = client.post(f"{NEGOTIATIONS}/{supplier_row['negotiationId']}/accept", headers=buyer)
     assert accepted.status_code == 200, accepted.text
-    order = client.post(f"{ORDERS}/from-negotiation/{supplier_row['negotiationId']}", headers=buyer)
+    order = client.post(
+        f"{ORDERS}/from-negotiation/{supplier_row['negotiationId']}",
+        json={"destinationPin": "560076"},
+        headers=buyer,
+    )
     assert order.status_code == 201, order.text
     converted = client.get(f"{REQUESTS}/{created['id']}", headers=buyer).json()
     assert converted["status"] == "converted"
     assert converted["canCancel"] is False
+
+
+def test_comparison_keeps_each_suppliers_offer_and_snapshots_the_request(client, world, product):
+    from sqlalchemy import select
+
+    from app.models.identity import Organisation, Role, User, UserRole
+
+    org = world.users["supplier"].organisation
+    org.dispatch_pin = "560001"
+    org.dispatch_label = "Bengaluru"
+    world.session.flush()
+    _create(client, world, product, askingPrice="100.2500")
+    other_org = Organisation(code=f"RFQ-{world.suffix}", name="Second Mill", org_type="supplier", dispatch_pin="560001", dispatch_label="Bengaluru")
+    world.session.add(other_org)
+    world.session.flush()
+    other = User(email=f"rfq-{world.suffix.lower()}@test.local", full_name="Second Supplier", organisation_id=other_org.id)
+    world.session.add(other)
+    world.session.flush()
+    role = world.session.scalar(select(Role).where(Role.code == "supplier"))
+    world.session.add(UserRole(user_id=other.id, role_id=role.id))
+    world.session.flush()
+    from tests.test_api import as_actor
+    assert client.post("/api/v1/listings", json={
+        "productCode": product.product_code, "minimumQuantity": "100", "askingPrice": "90.0000",
+        "currency": "INR", "availability": "in_stock",
+    }, headers=as_actor(other)).status_code == 201
+    assert client.post("/api/v1/admin/freight/rules", json={
+        "originPin": "560001", "originLabel": "Bengaluru", "destinationPin": "560001",
+        "destinationLabel": "Same city", "ratePerKg": "1.2500", "currency": "INR", "minimumFreight": "1500",
+        "isActive": True, "effectiveFrom": "2026-01-01",
+    }, headers=as_user(world, "platform")).status_code == 201
+
+    buyer = as_user(world, "buyer")
+    created = client.post(REQUESTS, json=_body(
+        product, requiredBy="2026-10-15", paymentTerms="30 days",
+        supplierUserIds=[str(world.users["supplier"].id), str(other.id)],
+    ), headers=buyer)
+    assert created.status_code == 201, created.text
+    draft = created.json()
+    assert draft["requiredBy"] == "2026-10-15" and draft["paymentTerms"] == "30 days"
+    assert isinstance(draft["requirements"], list)
+    sent = client.post(f"{REQUESTS}/{draft['id']}/send", headers=buyer)
+    assert sent.status_code == 200, sent.text
+    rows = {row["supplierUserId"]: row for row in sent.json()["suppliers"]}
+    assert set(rows) == {str(world.users["supplier"].id), str(other.id)}
+    for row in rows.values():
+        assert row["negotiationStatus"] == "open"
+        assert row["freightStatus"] == "estimated"
+        assert row["freight"]["amount"] == "1500.0000"
+        room = client.get(f"{NEGOTIATIONS}/{row['negotiationId']}", headers=buyer).json()
+        assert room["destinationPin"] == "560001"
+        assert room["requiredBy"] == "2026-10-15" and room["paymentTerms"] == "30 days"
+        assert len(room["versions"]) == 1
+    first = rows[str(world.users["supplier"].id)]
+    second = rows[str(other.id)]
+    assert client.post(f"{NEGOTIATIONS}/{first['negotiationId']}/offers", json={"offeredPrice": "99.5000"}, headers=as_user(world, "supplier")).status_code == 201
+    assert client.post(f"{NEGOTIATIONS}/{second['negotiationId']}/offers", json={"offeredPrice": "88.0000"}, headers=as_actor(other)).status_code == 201
+    compared = {row["supplierUserId"]: row for row in client.get(f"{REQUESTS}/{draft['id']}", headers=buyer).json()["suppliers"]}
+    assert compared[str(world.users["supplier"].id)]["latestOffer"]["amount"] == "99.5000"
+    assert compared[str(other.id)]["latestOffer"]["amount"] == "88.0000"
+    assert compared[str(world.users["supplier"].id)]["askingPrice"]["amount"] == "100.2500"
+    assert compared[str(world.users["supplier"].id)]["materialValue"]["amount"] == "99500.0000"
+    assert compared[str(world.users["supplier"].id)]["landedEstimate"]["amount"] == "101000.0000"
+    charges = compared[str(world.users["supplier"].id)]["charges"]
+    assert charges["gstRatePercent"] == 18
+    assert charges["gstBasis"] == "GST extra at 18% on material and estimated freight"
+    assert charges["gst"]["amount"] == "18180.0000"
+    assert charges["payable"]["amount"] == "119180.0000"
+    assert charges["payable"]["amount"] != compared[str(world.users["supplier"].id)]["latestOffer"]["amount"]
+    quote = compared[str(world.users["supplier"].id)]["quote"]
+    assert quote["offeredPrice"]["amount"] == "99.5000"
+    assert quote["snapshot"]["amount"] == "95.1250"
+    assert quote["currentAverage"]["amount"] == "95.1250"
+    assert quote["versusSnapshot"]["amount"] == "4.3750"
+    assert quote["versusAverage"]["amount"] == "4.3750"
+    assert len(client.get(f"{NEGOTIATIONS}/{first['negotiationId']}", headers=buyer).json()["versions"]) == 2
+    omitted = client.post(REQUESTS, json=_body(product), headers=buyer).json()
+    assert omitted["requiredBy"] is None
 
 
 def test_ineligible_supplier_is_rejected_and_a_draft_can_be_cancelled(client, world, product):

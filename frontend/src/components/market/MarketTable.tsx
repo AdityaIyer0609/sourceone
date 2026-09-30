@@ -20,6 +20,7 @@ export function MarketTable({ benchmarks, compact = false, onSelect }: { benchma
                 <td>
                   <strong>{current ? formatMoney(current.value) : "Rate on request"}</strong>
                   <small>{current ? `/ ${benchmark.unit.label} · ${benchmark.priceBasis.label.toLowerCase()} · ${benchmark.taxBasis.label}` : "No current benchmark"}</small>
+                  {benchmark.spread?.state === "ok" && benchmark.spread.minimum && benchmark.spread.maximum && <small>Spread {formatMoney(benchmark.spread.minimum)}–{formatMoney(benchmark.spread.maximum)}</small>}
                 </td>
                 <td>
                   {direction && movement.percent !== null ? (

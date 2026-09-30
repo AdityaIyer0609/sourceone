@@ -54,6 +54,20 @@ export interface BenchmarkSummary {
     percent: string | null
   }
   sparkline: { range: string; state: DataState; points: HistoryPoint[] }
+  spread: {
+    state: 'ok' | 'unavailable'
+    minimum: Money | null
+    maximum: Money | null
+    askCount: number
+  }
+}
+
+export interface QuotePosition {
+  offeredPrice: Money | null
+  snapshot: Money | null
+  currentAverage: Money | null
+  versusSnapshot: Money | null
+  versusAverage: Money | null
 }
 
 export interface BenchmarkHistory {

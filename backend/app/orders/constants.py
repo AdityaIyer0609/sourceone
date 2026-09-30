@@ -4,6 +4,7 @@ from enum import StrEnum
 class OrderPermission(StrEnum):
     PLACE = "order.place"
     FULFIL = "order.fulfil"
+    APPROVE = "order.approve"
 
 
 class OrderStatus(StrEnum):
@@ -12,6 +13,7 @@ class OrderStatus(StrEnum):
     PROCESSING = "processing"
     READY = "ready"
     DISPATCHED = "dispatched"
+    IN_TRANSIT = "in_transit"
     DELIVERED = "delivered"
     CANCELLED = "cancelled"
 
@@ -22,12 +24,14 @@ NEXT_STATUS = {
     OrderStatus.CONFIRMED: OrderStatus.PROCESSING,
     OrderStatus.PROCESSING: OrderStatus.READY,
     OrderStatus.READY: OrderStatus.DISPATCHED,
-    OrderStatus.DISPATCHED: OrderStatus.DELIVERED,
+    OrderStatus.DISPATCHED: OrderStatus.IN_TRANSIT,
+    OrderStatus.IN_TRANSIT: OrderStatus.DELIVERED,
 }
 FULFILMENT_FLOW = (
     OrderStatus.PLACED, OrderStatus.CONFIRMED, OrderStatus.PROCESSING,
-    OrderStatus.READY, OrderStatus.DISPATCHED, OrderStatus.DELIVERED,
+    OrderStatus.READY, OrderStatus.DISPATCHED, OrderStatus.IN_TRANSIT, OrderStatus.DELIVERED,
 )
+SHIPMENT_STATUSES = (OrderStatus.DISPATCHED, OrderStatus.IN_TRANSIT)
 CANCELLABLE_STATUSES = (OrderStatus.PLACED, OrderStatus.CONFIRMED)
 TERMINAL_STATUSES = (OrderStatus.DELIVERED, OrderStatus.CANCELLED)
 

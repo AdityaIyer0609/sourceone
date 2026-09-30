@@ -4,8 +4,10 @@ import { useSearchParams } from "react-router-dom";
 import { useNavigate } from "react-router-dom";
 import { paths } from "../../app/paths";
 import { AsyncContent } from "../../components/feedback/AsyncContent";
+import { OrgLink } from "../../components/supplier/OrgLink";
 import { Badge, Button, Input, Modal } from "../../components/ui";
 import { getErrorMessage } from "../../lib/api/client";
+import { readDeliveryPin } from "../../lib/deliveryPin";
 import { estimateFreight, shownFreight, type FreightBasis, type FreightEstimate } from "../../lib/api/freight";
 import { listReorders, startReorder, type ReorderItem } from "../../lib/api/orders";
 import { useApiQuery } from "../../lib/api/useApiQuery";
@@ -25,7 +27,7 @@ function quantityText(quantity: string, uom: string) {
 function ReorderModal({ item, onClose }: { item: ReorderItem; onClose: () => void }) {
   const navigate = useNavigate();
   const [quantity, setQuantity] = useState(item.quantity);
-  const [pin, setPin] = useState("");
+  const [pin, setPin] = useState(readDeliveryPin);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [basis, setBasis] = useState<FreightBasis>("standard");
@@ -66,7 +68,7 @@ function ReorderModal({ item, onClose }: { item: ReorderItem; onClose: () => voi
     <Modal open title={`Reorder ${item.orderNumber}`} onClose={onClose}>
       <div className="modal-cost">
         <span><small>Product</small><strong>{item.productName}</strong></span>
-        <span><small>Supplier</small><strong>{item.organisation} · {item.supplierName}</strong></span>
+        <span><small>Supplier</small><strong><OrgLink organisationId={item.organisationId}>{item.organisation}</OrgLink> · {item.supplierName}</strong></span>
         <span><small>Previous final price</small><strong>{formatMoney(item.previousPrice, 4)} / {item.uom.toLowerCase()}</strong></span>
         <span><small>Current asking price</small><strong>{item.currentAskingPrice ? `${formatMoney(item.currentAskingPrice, 4)} / ${item.uom.toLowerCase()}` : "—"}</strong></span>
         <span><small>Plenza benchmark</small><strong>{item.currentBenchmark ? formatMoney(item.currentBenchmark, 4) : "Rate on request"}</strong></span>
@@ -123,7 +125,7 @@ export function ReorderWorkspace() {
           <div className="market-table-wrap"><table className="market-table"><thead><tr><th>Order</th><th>Product / supplier</th><th>Previous quantity</th><th>Previous price</th><th>Availability</th><th>Order date</th><th/></tr></thead><tbody>{rows.map((item) => (
             <tr key={item.orderId}>
               <td><strong>{item.orderNumber}</strong><small>{titleCase(item.orderStatus)}</small></td>
-              <td><strong>{item.productName}</strong><small>{item.organisation} · {item.supplierName}</small></td>
+              <td><strong>{item.productName}</strong><small><OrgLink organisationId={item.organisationId}>{item.organisation}</OrgLink> · {item.supplierName}</small></td>
               <td>{quantityText(item.quantity, item.uom)}</td>
               <td><strong>{formatMoney(item.previousPrice, 4)}</strong><small>{item.currency} · previous final price</small></td>
               <td>{item.available ? <Badge tone="positive">AVAILABLE</Badge> : <Badge tone={item.unavailableReason === "cancelled" ? "negative" : "warning"}>{item.unavailableReason === "cancelled" ? "CANCELLED" : "UNAVAILABLE"}</Badge>}<small>{item.unavailableReason ? BLOCK_LABEL[item.unavailableReason] : "Current listing"}</small></td>

@@ -23,6 +23,8 @@ def _present(db: DbSession, user: User) -> AdminUserOut:
         full_name=user.full_name,
         email=user.email,
         organisation=user.organisation.name,
+        organisation_id=user.organisation_id,
+        organisation_type=user.organisation.org_type,
         roles=_roles(db, user.id),
         is_active=user.is_active,
         is_system=user.is_system,
@@ -36,7 +38,10 @@ def get_users(db: DbSession, actor: Manager):
 
 @router.post("", response_model=AdminUserOut, status_code=201)
 def post_user(body: AdminUserIn, db: DbSession, actor: Manager):
-    user = create_user(db, actor, full_name=body.full_name, email=body.email, password=body.password, role=body.role)
+    user = create_user(
+        db, actor, full_name=body.full_name, email=body.email, password=body.password, role=body.role,
+        organisation_id=body.organisation_id,
+    )
     db.commit()
     return _present(db, user)
 

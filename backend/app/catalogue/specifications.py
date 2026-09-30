@@ -32,6 +32,14 @@ def clean_specifications(raw: dict | None) -> dict[str, str]:
     return cleaned
 
 
+def requirement_snapshot(product: Product) -> list[dict]:
+    """Rows with a value, frozen for a request, negotiation, or order."""
+    return [
+        {"key": row["key"], "label": row["label"], "value": row["value"]}
+        for row in specification_rows(product) if row.get("value")
+    ]
+
+
 def specification_rows(product: Product) -> list[dict]:
     stored = {str(key): str(value) for key, value in (product.specifications or {}).items() if value}
     rows = [{"key": key, "label": label, "value": stored.get(key)} for key, label in CORE_FIELDS]

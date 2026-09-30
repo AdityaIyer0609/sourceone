@@ -60,7 +60,7 @@ def test_marketplace_benchmark_and_supplier_count(client, world):
     buyer = as_user(world, "buyer")
     priced = client.get(f"{PRODUCTS}/{live.product_code}", headers=buyer).json()
     assert priced["availability"] == "available"
-    assert priced["pricing"][0]["current"]["value"] == {"amount": "99.4000", "currency": "INR"}
+    assert priced["pricing"][0]["current"]["value"] == {"amount": "100.2500", "currency": "INR"}
     assert priced["listingCount"] == 1
     assert priced["uom"] == {"code": "KG", "label": "kg"}
     on_request = client.get(f"{PRODUCTS}/{plain.product_code}", headers=buyer).json()

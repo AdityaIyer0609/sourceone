@@ -2,7 +2,7 @@ from decimal import Decimal
 
 from sqlalchemy import func, select
 
-from app.models.listing import SupplierListing
+from app.models.listing import AskingPriceAverage, SupplierListing
 from app.models.pricing import BenchmarkRate
 from tests.test_api import as_user
 from tests.test_negotiations import _start, product  # noqa: F401
@@ -72,7 +72,26 @@ def test_negotiation_uses_the_selected_supplier_and_benchmark_stays_separate(cli
     assert started.status_code == 201, started.text
     body = started.json()
     assert body["supplier"]["name"] == world.users["supplier"].full_name
-    assert body["benchmark"]["value"] == {"amount": "99.4000", "currency": "INR"}
+    assert body["benchmark"]["value"] == {"amount": "100.2500", "currency": "INR"}
+    assert body["benchmark"]["basis"] == "ASKING_AVERAGE/GST_EXCLUDED"
     assert body["versions"][0]["offeredPrice"] == {"amount": "100.2500", "currency": "INR"}
     assert world.session.get(SupplierListing, listing["id"]).asking_price == Decimal("100.2500")
     assert world.session.scalar(select(func.count()).select_from(BenchmarkRate)) == before
+
+
+def test_price_edit_updates_the_listing_and_the_average_not_a_benchmark(client, world, product):
+    created = _create(client, world, product, askingPrice="100.0000").json()
+    averages = select(func.count()).select_from(AskingPriceAverage).where(AskingPriceAverage.product_id == product.id)
+    before_average = world.session.scalar(averages)
+    before_benchmark = world.session.scalar(select(func.count()).select_from(BenchmarkRate))
+    same = client.patch(f"{LISTINGS}/{created['id']}", json={"askingPrice": "100.0000"}, headers=as_user(world, "supplier"))
+    assert same.status_code == 200, same.text
+    assert world.session.scalar(averages) == before_average
+    changed = client.patch(f"{LISTINGS}/{created['id']}", json={"askingPrice": "110.0000"}, headers=as_user(world, "supplier"))
+    assert changed.status_code == 200, changed.text
+    assert changed.json()["askingPrice"]["amount"] == "110.0000"
+    assert world.session.scalar(averages) == before_average + 1
+    assert world.session.scalar(select(func.count()).select_from(BenchmarkRate)) == before_benchmark
+    own = client.get(LISTINGS, headers=as_user(world, "supplier")).json()
+    assert created["id"] in {row["id"] for row in own}
+    assert client.get(LISTINGS, headers=as_user(world, "buyer")).status_code == 403

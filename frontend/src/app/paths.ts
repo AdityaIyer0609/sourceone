@@ -10,10 +10,15 @@ export const paths = {
   orderTracking: '/order-tracking',
   reorder: '/reorder',
   dashboard: '/dashboard',
+  supplierHome: '/supplier',
+  listings: '/listings',
   itemMaster: '/admin/item-master',
   rateManagement: '/admin/rate-management',
   freightManagement: '/admin/freight',
   users: '/admin/users',
+  approvals: '/approvals',
+  company: '/company',
+  supplier: (organisationId: string) => `/suppliers/${encodeURIComponent(organisationId)}`,
 } as const
 
 export interface RouteHandle {

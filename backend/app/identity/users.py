@@ -46,7 +46,7 @@ def _organisation(session: Session, *, role: str, name: str) -> Organisation:
     while session.scalar(select(Organisation.id).where(Organisation.code == code)) is not None:
         suffix += 1
         code = f"{base}-{suffix}"
-    org = Organisation(code=code, name=name, org_type="buyer" if role == "buyer" else "supplier")
+    org = Organisation(code=code, name=name, org_type="supplier" if role == "supplier" else "buyer")
     session.add(org)
     session.flush()
     return org
@@ -64,6 +64,7 @@ def _active_platform_admins(session: Session) -> int:
 
 def create_user(
     session: Session, actor: Actor, *, full_name: str, email: str, password: str, role: str,
+    organisation_id: uuid.UUID | None = None,
 ) -> User:
     actor.require(IdentityPermission.MANAGE)
     name = " ".join(full_name.split())
@@ -77,8 +78,17 @@ def create_user(
     if session.scalar(select(User.id).where(User.email == address)) is not None:
         raise ValidationFailed("Email is already in use", details={"field": "email"})
     chosen = _role(session, role)
+    if organisation_id is not None:
+        organisation = session.get(Organisation, organisation_id)
+        if organisation is None:
+            raise ValidationFailed("Company not found", details={"organisationId": str(organisation_id)})
+        expected = "supplier" if role == "supplier" else "platform" if role in ("platform_admin", "pricing_admin") else "buyer"
+        if organisation.org_type != expected:
+            raise ValidationFailed("That company does not match this role", details={"organisationId": str(organisation_id)})
+    else:
+        organisation = _organisation(session, role=role, name=name)
     user = User(
-        email=address, full_name=name, organisation_id=_organisation(session, role=role, name=name).id,
+        email=address, full_name=name, organisation_id=organisation.id,
         is_active=True, is_system=False, password_hash=hash_password(password),
     )
     session.add(user)

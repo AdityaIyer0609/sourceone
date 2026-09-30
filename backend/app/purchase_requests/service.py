@@ -2,7 +2,7 @@
 
 import uuid
 from collections.abc import Sequence
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 
 from sqlalchemy import or_, select, text
@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.catalogue import listings as catalogue_listings
 from app.catalogue import products as catalogue
+from app.catalogue.specifications import requirement_snapshot
 from app.core.clock import business_today, utcnow
 from app.core.errors import InvalidStateTransition, NotFound, PermissionDenied, ValidationFailed
 from app.freight import service as freight
@@ -138,6 +139,9 @@ def create_request(
     destination_pin: str,
     message: str | None,
     supplier_user_ids: list[uuid.UUID],
+    required_by: date | None = None,
+    payment_terms: str | None = None,
+    freight_basis: str = "standard",
     now: datetime | None = None,
 ) -> PurchaseRequest:
     actor.require(NegotiationPermission.BUY)
@@ -150,6 +154,11 @@ def create_request(
             f"This product is bought in {product.uom}",
             details={"uom": product.uom},
         )
+    if freight_basis not in ("standard", "distance"):
+        raise ValidationFailed("Choose normal freight or road distance", details={"freightBasis": freight_basis})
+    terms = (payment_terms or "").strip() or None
+    if terms is not None and len(terms) > 120:
+        raise ValidationFailed("Payment terms are too long", details={"field": "paymentTerms"})
     request = PurchaseRequest(
         request_number=_next_number(session, now),
         buyer_user_id=actor.user_id,
@@ -157,6 +166,10 @@ def create_request(
         quantity=quantity,
         uom=product.uom,
         destination_pin=freight._pin(destination_pin, "destinationPin"),
+        freight_basis=freight_basis,
+        required_by=required_by,
+        payment_terms=terms,
+        requirements=requirement_snapshot(product),
         message=(message or "").strip() or None,
         status=RequestStatus.DRAFT,
         created_at=now,
@@ -211,6 +224,11 @@ def send_request(session: Session, actor: Actor, request_id: uuid.UUID) -> Purch
             offered_price=listing.asking_price,
             supplier_user_id=row.supplier_user_id,
             message=request.message or f"Purchase request {request.request_number}.",
+            destination_pin=request.destination_pin,
+            freight_basis=request.freight_basis,
+            required_by=request.required_by,
+            payment_terms=request.payment_terms,
+            requirements=request.requirements,
         )
         row.negotiation_id = negotiation.id
         row.negotiation = negotiation

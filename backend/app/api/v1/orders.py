@@ -3,34 +3,72 @@
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, File, Form, UploadFile
+from fastapi.responses import FileResponse, JSONResponse
 
 from app.api.deps import DbSession, require_any
 from app.api.v1.negotiations import party_out, quantity_text
 from app.identity.service import Actor
+from app.models.approval import OrderApproval
 from app.models.order import Order
-from app.orders import reorder, service
+from app.orders import documents, reorder, service
+from app.schemas.negotiation import RequirementOut
 from app.orders.constants import FULFILMENT_FLOW, OrderPermission, OrderStatus
 from app.schemas.order import (
     AgreedPriceOut,
     CancelOrderIn,
+    CreateOrderIn,
     NegotiationRefOut,
     OrderActionsOut,
+    DocumentReviewIn,
+    OrderDocumentOut,
     OrderOut,
     OrderProductOut,
     ReorderIn,
     ReorderItemOut,
     ReorderOut,
+    PodLinkOut,
+    ShipmentOut,
     StatusChangeIn,
     StatusEventOut,
     TrackingOut,
     TrackingStepOut,
+    ShipmentIn,
 )
-from app.schemas.pricing import Money
+from app.pricing.charges import display_charges
+from app.schemas.pricing import ChargeOut, Money
 
 router = APIRouter(prefix="/orders", tags=["orders"])
 
 Participant = Annotated[Actor, Depends(require_any(OrderPermission.PLACE, OrderPermission.FULFIL))]
+
+STATUS_LABELS = {
+    "placed": "Placed",
+    "confirmed": "Confirmed",
+    "processing": "Processing",
+    "ready": "Ready",
+    "dispatched": "Dispatched",
+    "in_transit": "In transit",
+    "delivered": "Delivered",
+    "cancelled": "Cancelled",
+}
+
+
+def _shipment(order: Order) -> ShipmentOut:
+    return ShipmentOut(
+        lr_number=order.shipment_lr,
+        transporter=order.shipment_transporter,
+        vehicle=order.shipment_vehicle,
+        eta=order.shipment_eta,
+    )
+
+
+def _pod(order: Order) -> PodLinkOut | None:
+    pods = [document for document in documents.visible_documents(order) if document.document_type == "pod"]
+    if not pods:
+        return None
+    document = pods[-1]
+    return PodLinkOut(id=document.id, filename=document.filename, status=document.status)
 
 
 def _tracking(actor: Actor, order: Order) -> TrackingOut:
@@ -42,7 +80,7 @@ def _tracking(actor: Actor, order: Order) -> TrackingOut:
         event = reached.get(status)
         state = "current" if status == order.status else "completed" if event else "pending"
         steps.append(TrackingStepOut(
-            status=status, label=status.title(), state=state,
+            status=status, label=STATUS_LABELS[status], state=state,
             at=event.created_at if event else None, note=event.note if event else None,
             changed_by=event.changed_by.full_name if event else None,
         ))
@@ -71,6 +109,23 @@ def _tracking(actor: Actor, order: Order) -> TrackingOut:
             for e in events
         ],
         last_updated_at=events[-1].created_at if events else order.updated_at,
+        shipment=_shipment(order),
+        required_by=order.negotiation.required_by,
+        delayed=service.is_delayed(order),
+        pod=_pod(order),
+    )
+
+
+def _charges(order: Order) -> ChargeOut:
+    freight = order.freight_amount if order.freight_status == "estimated" else None
+    shown = display_charges(order.total_value, freight)
+    return ChargeOut(
+        material=Money(amount=f"{shown['material']:.4f}", currency=order.currency),
+        freight=Money(amount=f"{shown['freight']:.4f}", currency=order.currency) if shown["freight"] is not None else None,
+        gst_rate_percent=shown["gst_rate_percent"],
+        gst_basis=shown["gst_basis"],
+        gst=Money(amount=f"{shown['gst']:.4f}", currency=order.currency),
+        payable=Money(amount=f"{shown['payable']:.4f}", currency=order.currency),
     )
 
 
@@ -89,6 +144,11 @@ def _present(actor: Actor, order: Order) -> OrderOut:
             unit_price=Money(amount=f"{order.agreed_unit_price:.4f}", currency=order.currency), uom=order.uom
         ),
         total_value=Money(amount=f"{order.total_value:.2f}", currency=order.currency),
+        charges=_charges(order),
+        destination_pin=order.destination_pin,
+        freight_status=order.freight_status,
+        freight=Money(amount=f"{order.freight_amount:.4f}", currency=order.currency) if order.freight_amount is not None else None,
+        freight_match=order.freight_match,
         negotiation=NegotiationRefOut(
             id=order.negotiation_id,
             negotiation_number=order.negotiation.negotiation_number,
@@ -102,14 +162,28 @@ def _present(actor: Actor, order: Order) -> OrderOut:
         updated_at=order.updated_at,
         cancelled_at=order.cancelled_at,
         cancel_reason=order.cancel_reason,
+        requirements=[RequirementOut(**row) for row in (order.requirements or [])],
+        documents=[
+            OrderDocumentOut(
+                id=document.id, document_type=document.document_type, filename=document.filename,
+                status=document.status, byte_size=document.byte_size,
+            )
+            for document in documents.visible_documents(order)
+        ],
     )
 
 
-@router.post("/from-negotiation/{negotiation_id}", response_model=OrderOut, status_code=201)
-def create_from_negotiation(negotiation_id: uuid.UUID, db: DbSession, actor: Participant):
-    order = service.create_from_negotiation(db, actor, negotiation_id)
+@router.post("/from-negotiation/{negotiation_id}", response_model=None)
+def create_from_negotiation(negotiation_id: uuid.UUID, body: CreateOrderIn, db: DbSession, actor: Participant):
+    result = service.create_from_negotiation(
+        db, actor, negotiation_id, destination_pin=body.destination_pin, freight_basis=body.freight_basis,
+    )
     db.commit()
-    return _present(actor, service.get_order(db, actor, order.id))
+    if isinstance(result, OrderApproval):
+        from app.api.v1.approvals import _present as present_approval
+        return JSONResponse(status_code=202, content=present_approval(result).model_dump(mode="json", by_alias=True))
+    presented = _present(actor, service.get_order(db, actor, result.id))
+    return JSONResponse(status_code=201, content=presented.model_dump(mode="json", by_alias=True))
 
 
 @router.get("", response_model=list[OrderOut])
@@ -133,6 +207,7 @@ def _reorder_item(item: dict) -> ReorderItemOut:
         supplier_user_id=order.supplier_user_id,
         supplier_name=order.supplier.full_name,
         organisation=order.supplier.organisation.name,
+        organisation_id=order.supplier.organisation_id,
         quantity=quantity_text(order.quantity),
         uom=order.uom,
         currency=order.currency,
@@ -196,7 +271,20 @@ def get_tracking(order_id: uuid.UUID, db: DbSession, actor: Participant):
 
 @router.post("/{order_id}/status", response_model=TrackingOut)
 def change_status(order_id: uuid.UUID, body: StatusChangeIn, db: DbSession, actor: Participant):
-    service.advance_order(db, actor, order_id, to_status=OrderStatus(body.to_status), note=body.note)
+    service.advance_order(
+        db, actor, order_id, to_status=OrderStatus(body.to_status), note=body.note,
+        lr_number=body.lr_number, transporter=body.transporter, vehicle=body.vehicle, eta=body.eta,
+    )
+    db.commit()
+    return _tracking(actor, service.get_order(db, actor, order_id))
+
+
+@router.post("/{order_id}/shipment", response_model=TrackingOut)
+def record_shipment(order_id: uuid.UUID, body: ShipmentIn, db: DbSession, actor: Participant):
+    service.save_shipment(
+        db, actor, order_id, lr_number=body.lr_number, transporter=body.transporter,
+        vehicle=body.vehicle, eta=body.eta,
+    )
     db.commit()
     return _tracking(actor, service.get_order(db, actor, order_id))
 
@@ -206,3 +294,41 @@ def cancel_order(order_id: uuid.UUID, db: DbSession, actor: Participant, body: C
     order = service.cancel_order(db, actor, order_id, reason=body.reason if body else None)
     db.commit()
     return _present(actor, order)
+
+
+@router.post("/{order_id}/documents", response_model=OrderDocumentOut, status_code=201)
+async def upload_order_document(
+    order_id: uuid.UUID,
+    db: DbSession,
+    actor: Participant,
+    documentType: Annotated[str, Form()],
+    file: Annotated[UploadFile, File()],
+):
+    content = await file.read()
+    document = documents.save_document(
+        db, actor, order_id, document_type=documentType, filename=file.filename or "document",
+        content_type=file.content_type or "application/octet-stream", content=content,
+    )
+    db.commit()
+    return OrderDocumentOut(
+        id=document.id, document_type=document.document_type, filename=document.filename,
+        status=document.status, byte_size=document.byte_size,
+    )
+
+
+@router.get("/{order_id}/documents/{document_id}/file")
+def download_order_document(order_id: uuid.UUID, document_id: uuid.UUID, db: DbSession, actor: Participant):
+    document, path = documents.open_document(db, actor, order_id, document_id)
+    return FileResponse(path, media_type=document.content_type, filename=document.filename)
+
+
+@router.post("/{order_id}/documents/{document_id}/review", response_model=OrderDocumentOut)
+def review_order_document(
+    order_id: uuid.UUID, document_id: uuid.UUID, body: DocumentReviewIn, db: DbSession, actor: Participant,
+):
+    document = documents.review_document(db, actor, order_id, document_id, status=body.status)
+    db.commit()
+    return OrderDocumentOut(
+        id=document.id, document_type=document.document_type, filename=document.filename,
+        status=document.status, byte_size=document.byte_size,
+    )

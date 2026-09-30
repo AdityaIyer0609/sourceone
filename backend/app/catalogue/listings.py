@@ -53,17 +53,69 @@ def create_listing(
     )
     session.add(listing)
     session.flush()
+    from app.catalogue import market_average
+
+    market_average.record(session, product.id, code)
     return listing
 
 
-def set_listing_active(session: Session, actor: Actor, listing_id: uuid.UUID, *, is_active: bool) -> SupplierListing:
+def _own(session: Session, actor: Actor, listing_id: uuid.UUID) -> SupplierListing:
     actor.require(NegotiationPermission.SUPPLY)
     listing = session.get(SupplierListing, listing_id)
     if listing is None or listing.supplier_user_id != actor.user_id:
         raise NotFound("Listing not found", details={"listingId": str(listing_id)})
-    listing.is_active = is_active
-    session.flush()
     return listing
+
+
+def own_listings(session: Session, actor: Actor) -> list[SupplierListing]:
+    """Every listing this supplier owns, including inactive ones. Not the public catalogue."""
+    actor.require(NegotiationPermission.SUPPLY)
+    return list(session.scalars(
+        select(SupplierListing)
+        .where(SupplierListing.supplier_user_id == actor.user_id)
+        .options(
+            selectinload(SupplierListing.product),
+            selectinload(SupplierListing.supplier).selectinload(User.organisation),
+        )
+        .order_by(SupplierListing.created_at.desc())
+    ).all())
+
+
+def update_listing(
+    session: Session,
+    actor: Actor,
+    listing_id: uuid.UUID,
+    *,
+    is_active: bool | None = None,
+    asking_price: Decimal | None = None,
+    minimum_quantity: Decimal | None = None,
+    availability: str | None = None,
+) -> SupplierListing:
+    if is_active is None and asking_price is None and minimum_quantity is None and availability is None:
+        raise ValidationFailed("Choose a listing field to update")
+    listing = _own(session, actor, listing_id)
+    market_changed = False
+    if asking_price is not None and asking_price != listing.asking_price:
+        listing.asking_price = asking_price
+        market_changed = True
+    if minimum_quantity is not None:
+        listing.minimum_quantity = minimum_quantity
+    if availability is not None:
+        if availability not in AVAILABILITY:
+            raise ValidationFailed("Availability must be in_stock, limited or on_request", details={"availability": availability})
+        listing.availability = availability
+    if is_active is not None and is_active != listing.is_active:
+        listing.is_active = is_active
+        market_changed = True
+    session.flush()
+    if market_changed:
+        from app.catalogue import market_average
+        market_average.record(session, listing.product_id, listing.currency)
+    return listing
+
+
+def set_listing_active(session: Session, actor: Actor, listing_id: uuid.UUID, *, is_active: bool) -> SupplierListing:
+    return update_listing(session, actor, listing_id, is_active=is_active)
 
 
 def can_supply(session: Session, user: User) -> bool:
@@ -75,7 +127,10 @@ def eligible_listings(session: Session, product: Product, *, currency: str | Non
     rows = session.scalars(
         select(SupplierListing)
         .where(SupplierListing.product_id == product.id, SupplierListing.is_active.is_(True))
-        .options(selectinload(SupplierListing.supplier).selectinload(User.organisation))
+        .options(
+            selectinload(SupplierListing.product),
+            selectinload(SupplierListing.supplier).selectinload(User.organisation),
+        )
         .order_by(SupplierListing.asking_price, SupplierListing.created_at)
     ).all()
     wanted = currency.upper() if currency else None

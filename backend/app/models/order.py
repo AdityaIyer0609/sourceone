@@ -1,8 +1,9 @@
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, Numeric, String, Text, UniqueConstraint
+from sqlalchemy import CheckConstraint, Date, DateTime, ForeignKey, Index, Numeric, String, Text, UniqueConstraint
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.clock import utcnow
@@ -28,6 +29,12 @@ class Order(UUIDPrimaryKey, Timestamps, Base):
         CheckConstraint("quantity > 0", name="quantity_positive"),
         CheckConstraint("agreed_unit_price > 0", name="agreed_unit_price_positive"),
         CheckConstraint("total_value = round(quantity * agreed_unit_price, 2)", name="total_matches_terms"),
+        CheckConstraint("destination_pin IS NULL OR destination_pin ~ '^[1-9][0-9]{5}$'", name="destination_pin"),
+        CheckConstraint("freight_status IS NULL OR freight_status IN ('estimated', 'on_request')", name="freight_status"),
+        CheckConstraint(
+            "freight_status IS NULL OR (freight_status = 'on_request' AND freight_amount IS NULL) OR (freight_status = 'estimated' AND freight_amount IS NOT NULL)",
+            name="freight_amount_matches_status",
+        ),
         CheckConstraint("buyer_user_id <> supplier_user_id", name="distinct_parties"),
         CheckConstraint("(status = 'cancelled') = (cancelled_at IS NOT NULL)", name="cancelled_iff_cancelled_at"),
         Index("ix_orders_buyer_status", "buyer_user_id", "status"),
@@ -46,7 +53,16 @@ class Order(UUIDPrimaryKey, Timestamps, Base):
     currency: Mapped[str] = mapped_column(String(3))
     agreed_unit_price: Mapped[Decimal] = mapped_column(PRICE)
     total_value: Mapped[Decimal] = mapped_column(ORDER_VALUE)
+    destination_pin: Mapped[str | None] = mapped_column(String(6))
+    freight_status: Mapped[str | None] = mapped_column(String(16))
+    freight_amount: Mapped[Decimal | None] = mapped_column(Numeric(18, 4))
+    freight_match: Mapped[str | None] = mapped_column(String(16))
+    requirements: Mapped[list | None] = mapped_column(JSONB)
     status: Mapped[str] = mapped_column(String(16))
+    shipment_lr: Mapped[str | None] = mapped_column(String(40))
+    shipment_transporter: Mapped[str | None] = mapped_column(String(80))
+    shipment_vehicle: Mapped[str | None] = mapped_column(String(40))
+    shipment_eta: Mapped[date | None] = mapped_column(Date)
     cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     cancelled_by_user_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"))
     cancel_reason: Mapped[str | None] = mapped_column(Text)
@@ -56,6 +72,7 @@ class Order(UUIDPrimaryKey, Timestamps, Base):
     buyer: Mapped[User] = relationship(foreign_keys=[buyer_user_id])
     supplier: Mapped[User] = relationship(foreign_keys=[supplier_user_id])
     product: Mapped[Product] = relationship()
+    documents: Mapped[list["OrderDocument"]] = relationship(order_by="OrderDocument.created_at", viewonly=True)
     status_events: Mapped[list["OrderStatusEvent"]] = relationship(
         order_by="OrderStatusEvent.created_at", viewonly=True
     )

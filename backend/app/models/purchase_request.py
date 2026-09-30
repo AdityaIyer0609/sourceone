@@ -1,8 +1,9 @@
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, String, Text, UniqueConstraint
+from sqlalchemy import CheckConstraint, Date, DateTime, ForeignKey, Index, String, Text, UniqueConstraint
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, Timestamps, UUIDPrimaryKey
@@ -23,6 +24,7 @@ class PurchaseRequest(UUIDPrimaryKey, Timestamps, Base):
         CheckConstraint(_in("uom", SUPPORTED_UNITS), name="uom"),
         CheckConstraint("quantity > 0", name="quantity_positive"),
         CheckConstraint("destination_pin ~ '^[1-9][0-9]{5}$'", name="destination_pin"),
+        CheckConstraint("freight_basis IN ('standard', 'distance')", name="freight_basis"),
         CheckConstraint("(status = 'cancelled') = (cancelled_at IS NOT NULL)", name="cancelled_iff_cancelled_at"),
         Index("ix_purchase_requests_buyer_status", "buyer_user_id", "status"),
     )
@@ -33,6 +35,11 @@ class PurchaseRequest(UUIDPrimaryKey, Timestamps, Base):
     quantity: Mapped[Decimal] = mapped_column(QUANTITY)
     uom: Mapped[str] = mapped_column(String(16))
     destination_pin: Mapped[str] = mapped_column(String(6))
+    freight_basis: Mapped[str] = mapped_column(String(16), default="standard", server_default="standard")
+    required_by: Mapped[date | None] = mapped_column(Date)
+    payment_terms: Mapped[str | None] = mapped_column(String(120))
+    # Product specifications at the time of the request. Null on older rows; never invented later.
+    requirements: Mapped[list | None] = mapped_column(JSONB)
     message: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String(32))
     cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

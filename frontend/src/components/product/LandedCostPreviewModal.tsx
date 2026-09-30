@@ -75,7 +75,7 @@ export function LandedCostPreviewModal({
       </label>
       {error && <p className="negative">{error}</p>}
       {estimate && (
-        <div className="chip-row" role="group" aria-label="Freight basis">
+        <div className="freight-basis" role="group" aria-label="Freight basis">
           <Button variant="ghost" className={`filter-chip${basis === "standard" ? " is-active" : ""}`} onClick={() => setBasis("standard")}>Normal freight</Button>
           <Button variant="ghost" className={`filter-chip${basis === "distance" ? " is-active" : ""}`} onClick={() => setBasis("distance")}>Road distance</Button>
         </div>

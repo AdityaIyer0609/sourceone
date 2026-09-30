@@ -1,5 +1,5 @@
 import { apiClient } from './client'
-import type { Money } from './pricing'
+import type { Money, QuotePosition } from './pricing'
 
 export type NegotiationStatus = 'draft' | 'open' | 'countered' | 'accepted' | 'rejected' | 'cancelled'
 export type NegotiationParty = 'buyer' | 'supplier'
@@ -36,9 +36,11 @@ export interface Negotiation {
   quantity: string
   uom: string
   currency: string
-  buyer: { name: string; organisation: string }
-  supplier: { name: string; organisation: string }
+  buyer: { name: string; organisation: string; organisationId: string }
+  supplier: { name: string; organisation: string; organisationId: string }
+  supplierUserId: string
   benchmark: BenchmarkSnapshot
+  quote: QuotePosition
   versions: NegotiationVersion[]
   /** Negotiated price = the accepted version's offer. */
   negotiated: { priceKind: 'negotiated_price'; versionNumber: number; price: Money; quantity: string; uom: string } | null
@@ -49,6 +51,15 @@ export interface Negotiation {
   updatedAt: string
   closedAt: string | null
   closedReason: string | null
+  destinationPin: string | null
+  freightStatus: 'estimated' | 'on_request' | null
+  freight: Money | null
+  freightMatch: string | null
+  freightBasis: 'standard' | 'distance' | null
+  requiredBy: string | null
+  paymentTerms: string | null
+  requirements: { key: string; label: string; value: string }[]
+  requirementResponses: { key: string; status: 'met' | 'not_met'; comment: string | null }[]
 }
 
 export interface OfferInput {
@@ -72,6 +83,8 @@ export interface StartNegotiationInput extends OfferInput {
   quantity: string
   currency?: string
   supplierUserId?: string
+  destinationPin?: string
+  freightBasis?: 'standard' | 'distance'
 }
 
 const BASE = '/negotiations'
@@ -91,3 +104,6 @@ export const acceptNegotiation = (id: string) => apiClient.post<Negotiation>(`${
 export const rejectNegotiation = (id: string, reason?: string) => apiClient.post<Negotiation>(`${BASE}/${id}/reject`, { reason })
 
 export const cancelNegotiation = (id: string, reason?: string) => apiClient.post<Negotiation>(`${BASE}/${id}/cancel`, { reason })
+
+export const answerRequirement = (id: string, key: string, status: 'met' | 'not_met', comment?: string) =>
+  apiClient.post<Negotiation>(`${BASE}/${id}/requirements/${encodeURIComponent(key)}`, { status, comment: comment || null })

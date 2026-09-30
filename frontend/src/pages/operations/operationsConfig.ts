@@ -5,29 +5,34 @@ export type OperationsScreen =
   | 'Order Tracking'
   | 'Reorder'
   | 'Dashboard'
+  | 'Supplier Home'
+  | 'Listings'
   | 'Item Master'
   | 'Rate Management'
   | 'Freight Management'
   | 'User Management'
+  | 'Approvals'
+  | 'Company'
 
 export interface OperationsConfig {
   kicker: string
   title: string
   description: string
-  action: string
-  /** Set when the header action has no backend equivalent yet; the button keeps its look but does nothing. */
-  actionUnavailable?: string
 }
 
 export const operationsConfigs: Record<OperationsScreen, OperationsConfig> = {
-  'Freight Calculator': { kicker: 'LANDED COST WORKBENCH', title: 'Purchase & freight calculator', description: 'Compare supply points and know the landed cost before raising a request.', action: 'Calculate route' },
-  'Purchase Requests': { kicker: 'PURCHASE OPERATIONS', title: 'Purchase requests', description: 'Ask an eligible supplier for a product. Sending opens a negotiation and does not place an order.', action: 'New request', actionUnavailable: 'Use New request in the list. Choose a product, quantity, delivery PIN and an optional supplier.' },
-  Orders: { kicker: 'PURCHASE OPERATIONS', title: 'Orders', description: 'A unified commercial view from approved PO to invoice.', action: 'Create order', actionUnavailable: 'Orders are created from an accepted negotiation. Open it in Negotiations and choose Create order.' },
-  'Order Tracking': { kicker: 'CONTROL TOWER', title: 'Order tracking', description: 'Live dispatch, route and delivery milestones across your network.', action: 'Track shipment', actionUnavailable: 'Live GPS tracking is not available. Milestones are updated by the supplier.' },
-  Reorder: { kicker: 'PURCHASE HISTORY', title: 'Reorder centre', description: "Repeat proven purchases with today's rate and terms.", action: 'Build reorder', actionUnavailable: 'Choose Reorder on a past order. It starts a new negotiation at the current asking price.' },
-  Dashboard: { kicker: 'CUSTOMER INTELLIGENCE', title: 'Procurement dashboard', description: 'Spend, savings and supply performance across your organization.', action: 'Export report', actionUnavailable: 'Export is not available. Figures are your Plenza orders and negotiations.' },
-  'Item Master': { kicker: 'ADMINISTRATION', title: 'Item master', description: 'Govern normalized specifications, SKUs and procurement controls.', action: 'Add item', actionUnavailable: 'Add a Plenza product in the form below. Products used by an order are deactivated, not deleted.' },
-  'Rate Management': { kicker: 'COMMERCIAL ADMIN', title: 'Rate management', description: 'Publish benchmarks, review submissions and maintain rate integrity.', action: 'Publish rates', actionUnavailable: 'Bulk publishing is not available. Publish each benchmark from the review queue.' },
-  'Freight Management': { kicker: 'COMMERCIAL ADMIN', title: 'Freight rules', description: 'Plenza freight lanes used only to estimate landed cost.', action: 'Add rule', actionUnavailable: 'Add or edit a lane in the form below. Freight stays an estimate.' },
-  'User Management': { kicker: 'ADMINISTRATION', title: 'User management', description: 'Create Plenza accounts and assign a role. Only a platform admin can do this.', action: 'Add user', actionUnavailable: 'Add a user in the form below. A deactivated user cannot sign in.' },
+  'Freight Calculator': { kicker: 'LANDED COST WORKBENCH', title: 'Purchase & freight calculator', description: 'Compare supply points and know the landed cost before raising a request.' },
+  'Purchase Requests': { kicker: 'PURCHASE OPERATIONS', title: 'Purchase requests', description: 'Ask an eligible supplier for a product. Sending opens a negotiation and does not place an order.' },
+  Orders: { kicker: 'PURCHASE OPERATIONS', title: 'Orders', description: 'A unified commercial view from approved PO to invoice.' },
+  'Order Tracking': { kicker: 'CONTROL TOWER', title: 'Order tracking', description: 'Live dispatch, route and delivery milestones across your network.' },
+  Reorder: { kicker: 'PURCHASE HISTORY', title: 'Reorder centre', description: "Repeat proven purchases with today's rate and terms." },
+  Dashboard: { kicker: 'CUSTOMER INTELLIGENCE', title: 'Procurement dashboard', description: 'Spend, savings and supply performance across your organization.' },
+  'Supplier Home': { kicker: 'SUPPLIER', title: 'Your work', description: 'Requests, negotiations, and orders that are waiting on you, plus your own listings and performance.' },
+  Listings: { kicker: 'SUPPLIER', title: 'Listings', description: 'Your asking prices. Saving a price updates the listing. It does not publish a benchmark.' },
+  'Item Master': { kicker: 'ADMINISTRATION', title: 'Item master', description: 'Govern normalized specifications, SKUs and procurement controls.' },
+  'Rate Management': { kicker: 'COMMERCIAL ADMIN', title: 'Rate management', description: 'Publish benchmarks, review submissions and maintain rate integrity.' },
+  'Freight Management': { kicker: 'COMMERCIAL ADMIN', title: 'Freight rules', description: 'Plenza freight lanes used only to estimate landed cost.' },
+  'User Management': { kicker: 'ADMINISTRATION', title: 'User management', description: 'Create Plenza accounts and assign a role. Only a platform admin can do this.' },
+  Approvals: { kicker: 'COMPANY', title: 'Approvals', description: 'Orders above the company material threshold wait here. Approving places the order. Declining leaves the negotiation accepted.' },
+  Company: { kicker: 'COMPANY', title: 'Company', description: 'People in this company, and the material total that needs a second person before an order is placed.' },
 }

@@ -7,7 +7,7 @@ import { createAdminUser, listAdminUsers, setAdminUserActive, setAdminUserRole, 
 import { useApiQuery } from "../../lib/api/useApiQuery";
 import { titleCase } from "../../lib/pricingFormat";
 
-const EMPTY = { fullName: "", email: "", password: "", role: "buyer" };
+const EMPTY = { fullName: "", email: "", password: "", role: "buyer", organisationId: "" };
 
 export function UsersWorkspace() {
   const users = useApiQuery("admin-users", (signal) => listAdminUsers(signal));
@@ -22,7 +22,7 @@ export function UsersWorkspace() {
     setBusy(true);
     setError(null);
     try {
-      await createAdminUser(draft);
+      await createAdminUser({ ...draft, organisationId: draft.organisationId || undefined });
       setDraft(EMPTY);
       users.reload();
     } catch (cause) {
@@ -70,6 +70,14 @@ export function UsersWorkspace() {
               {USER_ROLES.map((role) => <option key={role} value={role}>{titleCase(role)}</option>)}
             </select>
           </label>
+          {draft.role === "approver" && (
+            <label>Buyer company
+              <select className="input" aria-label="Buyer company" value={draft.organisationId} onChange={(event) => setDraft({ ...draft, organisationId: event.target.value })}>
+                <option value="">New company</option>
+                {[...new Map(rows.filter((row) => row.organisationType === "buyer").map((row) => [row.organisationId, row.organisation])).entries()].map(([id, name]) => <option key={id} value={id}>{name}</option>)}
+              </select>
+            </label>
+          )}
         </div>
         {error && <p className="negative">{error}</p>}
         <div className="modal-actions">

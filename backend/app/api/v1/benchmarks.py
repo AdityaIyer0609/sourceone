@@ -9,6 +9,7 @@ from sqlalchemy.orm import selectinload
 
 from app.api.deps import DbSession, require_any
 from app.api.v1 import pricing_presenters as present
+from app.catalogue import market_average
 from app.core.clock import utcnow
 from app.core.config import get_settings
 from app.core.errors import NotFound
@@ -57,14 +58,26 @@ def list_current_benchmarks(
     series_list = db.scalars(stmt).all()
     timelines = repository.timelines(db, [s.id for s in series_list])
     now = utcnow()
-    return [present.benchmark_summary(s, timelines.get(s.id, []), now) for s in series_list]
+    summaries = []
+    for series in series_list:
+        summary = present.benchmark_summary(series, timelines.get(series.id, []), now)
+        market = market_average.view(db, market_average.product_ids_for_series(db, series.id), series.currency)
+        if market is not None:
+            summary = present.apply_market_average(summary, market, now)
+        summaries.append(summary)
+    return summaries
 
 
 @router.get("/{series_code}", response_model=schemas.BenchmarkSummaryOut)
 def get_benchmark(series_code: str, db: DbSession, _: Viewer):
     series = _visible_series(db, series_code)
+    now = utcnow()
     timeline = repository.timelines(db, [series.id]).get(series.id, [])
-    return present.benchmark_summary(series, timeline, utcnow())
+    summary = present.benchmark_summary(series, timeline, now)
+    market = market_average.view(db, market_average.product_ids_for_series(db, series.id), series.currency)
+    if market is not None:
+        summary = present.apply_market_average(summary, market, now)
+    return summary
 
 
 @router.get("/{series_code}/history", response_model=schemas.HistoryOut)
@@ -76,9 +89,13 @@ def get_benchmark_history(
 ):
     settings = get_settings()
     series = _visible_series(db, series_code)
+    now = utcnow()
+    market = market_average.view(db, market_average.product_ids_for_series(db, series.id), series.currency)
+    if market is not None:
+        return present.market_history(series, market, range_code, now)
     timeline = repository.timelines(db, [series.id]).get(series.id, [])
     result = read_model.build_history(
-        timeline, range_code, utcnow(),
+        timeline, range_code, now,
         min_points=settings.pricing_history_min_points,
         volatility_min_points=settings.pricing_volatility_min_points,
     )
@@ -94,8 +111,28 @@ def estimate_material_value(
     unit: str = "KG",
 ):
     series = _visible_series(db, series_code)
+    now = utcnow()
+    market = market_average.view(db, market_average.product_ids_for_series(db, series.id), series.currency)
+    if market is not None and market.kind == "average" and market.average is not None and unit.upper() == series.unit:
+        amount = (market.average * quantity).quantize(Decimal("0.01"))
+        return schemas.EstimateOut(
+            label="Estimated material value at the average supplier asking price",
+            series_code=series.code,
+            availability="available",
+            quantity=str(quantity),
+            unit=series.unit,
+            unit_value=present.money(market.average, series.currency),
+            amount=schemas.Money(amount=f"{amount:.2f}", currency=series.currency),
+            benchmark_id=market.points[-1].point_id if market.points else None,
+            freshness_state="fresh",
+        )
+    if market is not None and market.kind == "on_request":
+        return schemas.EstimateOut(
+            label=ESTIMATE_LABEL, series_code=series.code, availability="rate_on_request",
+            quantity=str(quantity), unit=series.unit,
+        )
     timeline = repository.timelines(db, [series.id]).get(series.id, [])
-    current = read_model.resolve_current(timeline, utcnow())
+    current = read_model.resolve_current(timeline, now)
     estimate = comparison.estimate_material_value(quantity, unit.upper(), current)
     if estimate is None:
         return schemas.EstimateOut(

@@ -8,13 +8,15 @@ service layer, so the seeded data obeys the same lifecycle and four-eyes rules a
 """
 
 import argparse
+import math
 import sys
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 
-from sqlalchemy import select, text
+from sqlalchemy import delete, func, select, text
 from sqlalchemy.orm import Session
 
+from app.catalogue import market_average
 from app.catalogue import products
 from app.catalogue.resolver import normalize_text
 from app.core.clock import business_today, start_of_business_day, utcnow
@@ -25,7 +27,7 @@ from app.identity.service import actor_for
 from app.models.catalogue import Grade, GradeEquivalence, Market, MarketAlias, Producer, ProducerGradeAlias, Product
 from app.freight.constants import DEFAULT_RATE_PER_KM
 from app.models.freight import FreightDistanceRate, FreightRule
-from app.models.listing import SupplierListing
+from app.models.listing import AskingPriceAverage, SupplierListing
 from app.models.identity import Organisation, Role, User, UserRole
 from app.models.pricing import RateSeries, RateSource, SourceRate
 from app.negotiation import service as negotiation_service
@@ -38,7 +40,7 @@ ERP_SOURCE_CODE = "ERP-DOMESTICPRICE1-DEMO"
 DEMO_NOTE = "DEMO FIXTURE: synthetic rows shaped like ERP DomesticPrice1; not from a live ERP connection."
 
 DEMO_TABLES = (
-    "product_answers", "product_questions", "product_documents", "purchase_request_suppliers", "purchase_requests", "pin_coordinates", "road_distances", "freight_distance_rates", "freight_defaults", "freight_rules", "supplier_listings", "erp_price_row_imports", "erp_grades", "erp_customers", "erp_sync_runs", "order_status_events", "orders", "negotiation_versions", "negotiations", "product_rate_series", "products", "pricing_audit_events", "benchmark_rate_inputs", "benchmark_rates", "source_rates", "import_batches",
+    "product_answers", "product_questions", "product_documents", "requirement_responses", "order_documents", "purchase_request_suppliers", "purchase_requests", "pin_coordinates", "road_distances", "freight_distance_rates", "freight_defaults", "freight_rules", "asking_price_averages", "supplier_listings", "erp_price_row_imports", "erp_grades", "erp_customers", "erp_sync_runs", "order_status_events", "order_approvals", "orders", "negotiation_versions", "negotiations", "product_rate_series", "products", "pricing_audit_events", "benchmark_rate_inputs", "benchmark_rates", "source_rates", "import_batches",
     "rate_series", "rate_sources", "market_aliases", "grade_equivalence", "producer_grade_aliases",
     "markets", "grades", "producers", "user_roles", "users", "organisations",
 )
@@ -207,12 +209,42 @@ LISTINGS = [
 DISPATCH = {
     "ZENITH": ("361140", "Jamnagar"),
     "HARBOUR": ("394510", "Hazira"),
+    "KUTCH": ("370201", "Gandhidham"),
+    "SAURASHTRA": ("360001", "Rajkot"),
+    "COASTLINE": ("395003", "Surat"),
 }
+# key, email, name, organisation code, organisation name. Dispatch pins are in DISPATCH.
+MARKET_SUPPLIERS = [
+    ("mira", "mira@demo.sourceone", "Mira Shah", "KUTCH", "Kutch Resins (demo supplier)"),
+    ("kabir", "kabir@demo.sourceone", "Kabir Joshi", "SAURASHTRA", "Saurashtra Poly (demo supplier)"),
+    ("leela", "leela@demo.sourceone", "Leela Nair", "COASTLINE", "Coastline Polymers (demo supplier)"),
+]
+# supplier, product, MOQ, price 30 days ago, price today, currency, availability.
+# Today's price is the live asking price. The month of averages is built from these paths.
+MARKET_OFFERS = [
+    ("supplier", "PP-RAFFIA-A", "500", "98.4000", "100.2500", "INR", "in_stock"),
+    ("neil", "PP-RAFFIA-A", "1000", "99.1000", "101.4000", "INR", "limited"),
+    ("mira", "PP-RAFFIA-A", "750", "97.8000", "99.9000", "INR", "in_stock"),
+    ("kabir", "PP-RAFFIA-A", "500", "100.2000", "102.2000", "INR", "in_stock"),
+    ("supplier", "PP-MULTIFIL-A", "500", "102.5000", "104.7500", "INR", "in_stock"),
+    ("neil", "PP-MULTIFIL-A", "800", "103.8000", "106.1000", "INR", "in_stock"),
+    ("leela", "PP-MULTIFIL-A", "500", "101.9000", "103.4000", "INR", "limited"),
+    ("supplier", "LDPE-LAM-A", "250", "111.5000", "114.0000", "INR", "on_request"),
+    ("mira", "LDPE-LAM-A", "500", "110.2000", "112.5000", "INR", "in_stock"),
+    ("leela", "LDPE-LAM-A", "400", "113.0000", "115.7500", "INR", "in_stock"),
+    ("neil", "LLDPE-LINER-A", "500", "94.8000", "96.5000", "INR", "in_stock"),
+    ("kabir", "LLDPE-LINER-A", "600", "95.4000", "97.2500", "INR", "in_stock"),
+    ("leela", "LLDPE-LINER-A", "500", "94.1000", "95.8000", "INR", "limited"),
+]
+MARKET_HISTORY_DAYS = 31
 # origin pin, origin label, destination pin, destination label, ₹ or $ per kg, currency, minimum, active, from
 FREIGHT_RULES = [
     ("361140", "Jamnagar", "390020", "Vadodara", "1.2500", "INR", "1500", True, date(2026, 1, 1)),
     ("361140", "Jamnagar", "380015", "Ahmedabad", "1.1000", "INR", "1200", True, date(2026, 1, 1)),
     ("394510", "Hazira", "390020", "Vadodara", "1.8000", "INR", "2000", True, date(2026, 1, 1)),
+    ("370201", "Gandhidham", "390020", "Vadodara", "1.6000", "INR", "1800", True, date(2026, 1, 1)),
+    ("360001", "Rajkot", "390020", "Vadodara", "1.4500", "INR", "1600", True, date(2026, 1, 1)),
+    ("395003", "Surat", "390020", "Vadodara", "2.1000", "INR", "2200", True, date(2026, 1, 1)),
     ("361140", "Jamnagar", "370201", "Gandhidham", "0.9000", "INR", None, False, date(2026, 1, 1)),
     ("361140", "Jamnagar", "390020", "Vadodara", "0.0200", "USD", None, True, date(2026, 1, 1)),
 ]
@@ -331,6 +363,16 @@ def _reference_data(session: Session) -> dict:
             minimum_quantity=Decimal(minimum), asking_price=Decimal(price), currency=currency,
             availability=availability, is_active=active,
         ))
+    session.flush()
+    seen: set[tuple] = set()
+    for _user_key, product_code, _minimum, _price, currency, _availability, active in LISTINGS:
+        if not active:
+            continue
+        key = (catalogue[product_code].id, currency)
+        if key in seen:
+            continue
+        seen.add(key)
+        market_average.record(session, catalogue[product_code].id, currency)
     ensure_demo_freight(session)
     return {"users": users, "series": series}
 
@@ -411,6 +453,8 @@ def seed(session: Session) -> dict:
     )
     session.flush()
     _negotiations(session, users)
+    ensure_market_month(session)
+    ensure_demo_freight(session)
     return {"batches": len(batch_dates), "pending_iocl_draft": str(iocl_draft.id)}
 
 
@@ -459,6 +503,7 @@ FULFILMENT_NOTES = {
     OrderStatus.PROCESSING: "Material allocated from current production.",
     OrderStatus.READY: "Packed and palletised; quality certificate attached.",
     OrderStatus.DISPATCHED: None,
+    OrderStatus.IN_TRANSIT: "Vehicle left the plant.",
     OrderStatus.DELIVERED: "Received at buyer plant; delivery challan signed.",
 }
 
@@ -494,7 +539,7 @@ def _negotiations(session: Session, users: dict) -> None:
         accepting = parties[negotiation_service.awaiting_party(negotiation)]
         negotiation_service.accept_offer(session, accepting, negotiation.id, now=at)
         at += STEP
-        order = order_service.create_from_negotiation(session, buyer, negotiation.id, now=at)
+        order = order_service.create_from_negotiation(session, buyer, negotiation.id, destination_pin="390020", now=at)
         if final_status == OrderStatus.CANCELLED:
             at += STEP
             order_service.cancel_order(session, buyer, order.id, now=at, reason="Trial postponed by production.")
@@ -609,6 +654,122 @@ def ensure_demo_listings(session: Session) -> int:
     return added
 
 
+def _price_path(start: str, end: str, days: int, phase: float) -> list[Decimal]:
+    """Daily asking price from a month ago up to today's listing price, with a small wave."""
+    opened, closed = Decimal(start), Decimal(end)
+    path = []
+    for index in range(days):
+        if index == days - 1:
+            path.append(closed)
+            continue
+        progress = Decimal(index) / Decimal(days - 1)
+        wave = Decimal(str(round(math.sin(index / 2.7 + phase) * 0.45, 4)))
+        path.append((opened + (closed - opened) * progress + wave).quantize(Decimal("0.0001")))
+    return path
+
+
+def ensure_market_month(session: Session) -> int:
+    """Give several materials a month of supplier asking prices so the live graph can move.
+
+    Safe to run again: once a material already has the month of points, it is left alone.
+    """
+    role = session.scalar(select(Role).where(Role.code == "supplier"))
+    if role is None:
+        return 0
+    password = hash_password(DEMO_PASSWORD)
+    users = {
+        "supplier": session.scalar(select(User).where(User.email == "supplier@demo.sourceone")),
+        "neil": session.scalar(select(User).where(User.email == "neil@harbour.demo")),
+    }
+    if users["supplier"] is None:
+        return 0
+    for key, email, name, org_code, org_name in MARKET_SUPPLIERS:
+        org = session.scalar(select(Organisation).where(Organisation.code == org_code))
+        if org is None:
+            org = Organisation(code=org_code, name=org_name, org_type="supplier")
+            session.add(org)
+            session.flush()
+        pin, label = DISPATCH[org_code]
+        org.dispatch_pin = pin
+        org.dispatch_label = label
+        user = session.scalar(select(User).where(User.email == email))
+        if user is None:
+            user = User(email=email, full_name=name, organisation_id=org.id, is_system=False, password_hash=password)
+            session.add(user)
+            session.flush()
+            session.add(UserRole(user_id=user.id, role_id=role.id))
+        else:
+            user.password_hash = password
+            user.is_active = True
+        users[key] = user
+    if users["neil"] is not None:
+        users["neil"].password_hash = password
+    return _write_market_month(session, users)
+
+
+def _write_market_month(session: Session, users: dict) -> int:
+    sample = session.scalar(select(Product).where(Product.product_code == "PP-RAFFIA-A"))
+    if sample is None:
+        return 0
+    existing = session.scalar(
+        select(func.count()).select_from(AskingPriceAverage).where(AskingPriceAverage.product_id == sample.id)
+    )
+    if existing and existing >= MARKET_HISTORY_DAYS - 1:
+        return 0
+
+    phases = {"supplier": 0.0, "neil": 1.1, "mira": 2.2, "kabir": 3.0, "leela": 0.6}
+    by_product: dict[str, list] = {}
+    for offer in MARKET_OFFERS:
+        by_product.setdefault(offer[1], []).append(offer)
+
+    written = 0
+    today = business_today(utcnow())
+    for product_code, offers in by_product.items():
+        product = session.scalar(select(Product).where(Product.product_code == product_code))
+        if product is None:
+            continue
+        paths = []
+        for user_key, _code, minimum, start, end, currency, availability in offers:
+            user = users.get(user_key)
+            if user is None:
+                continue
+            listing = session.scalar(select(SupplierListing).where(
+                SupplierListing.supplier_user_id == user.id, SupplierListing.product_id == product.id,
+            ))
+            if listing is None:
+                listing = SupplierListing(
+                    supplier_user_id=user.id, product_id=product.id, uom="KG",
+                    minimum_quantity=Decimal(minimum), asking_price=Decimal(end), currency=currency,
+                    availability=availability, is_active=True,
+                )
+                session.add(listing)
+            else:
+                listing.asking_price = Decimal(end)
+                listing.is_active = True
+                listing.availability = availability
+                listing.currency = currency
+            paths.append(_price_path(start, end, MARKET_HISTORY_DAYS, phases[user_key]))
+        if not paths:
+            continue
+        session.flush()
+        session.execute(delete(AskingPriceAverage).where(
+            AskingPriceAverage.product_id == product.id, AskingPriceAverage.currency == offers[0][5],
+        ))
+        for day in range(MARKET_HISTORY_DAYS):
+            prices = [path[day] for path in paths]
+            average = (sum(prices, Decimal(0)) / len(prices)).quantize(Decimal("0.0001"))
+            session.add(AskingPriceAverage(
+                product_id=product.id,
+                currency=offers[0][5],
+                average_price=average,
+                supplier_count=len(prices),
+                recorded_at=start_of_business_day(today - timedelta(days=MARKET_HISTORY_DAYS - 1 - day)) + timedelta(hours=4),
+            ))
+            written += 1
+    session.flush()
+    return written
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Seed SourceOne pricing demo data")
     parser.add_argument("--reset", action="store_true", help="truncate demo tables first (keeps roles/permissions)")
@@ -619,12 +780,13 @@ def main() -> int:
         elif session.scalar(select(Organisation.id).limit(1)) is not None:
             accounts = ensure_demo_accounts(session)
             added = ensure_demo_listings(session)
+            points = ensure_market_month(session)
             freight = ensure_demo_freight(session)
             specs = ensure_demo_specifications(session)
             session.commit()
             total = session.scalar(text("SELECT count(*) FROM supplier_listings"))
             lanes = session.scalar(text("SELECT count(*) FROM freight_rules"))
-            print(f"Demo data already present. Sign-in accounts updated: {accounts}. Supplier listings added: {added}. supplier_listings: {total}. Freight rules added: {freight}. freight_rules: {lanes}. Specifications filled: {specs}")
+            print(f"Demo data already present. Sign-in accounts updated: {accounts}. Supplier listings added: {added}. Market-rate points written: {points}. supplier_listings: {total}. Freight rules added: {freight}. freight_rules: {lanes}. Specifications filled: {specs}")
             return 0
         summary = seed(session)
         session.commit()

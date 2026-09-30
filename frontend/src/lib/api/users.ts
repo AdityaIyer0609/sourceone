@@ -1,6 +1,6 @@
 import { apiClient } from './client'
 
-export const USER_ROLES = ['platform_admin', 'pricing_admin', 'buyer', 'supplier'] as const
+export const USER_ROLES = ['platform_admin', 'pricing_admin', 'buyer', 'supplier', 'approver'] as const
 export type UserRole = (typeof USER_ROLES)[number]
 
 export interface AdminUser {
@@ -8,6 +8,8 @@ export interface AdminUser {
   fullName: string
   email: string
   organisation: string
+  organisationId: string
+  organisationType: string
   roles: string[]
   isActive: boolean
   isSystem: boolean
@@ -16,7 +18,7 @@ export interface AdminUser {
 export const listAdminUsers = (signal?: AbortSignal) =>
   apiClient.get<AdminUser[]>('/admin/users', { signal })
 
-export const createAdminUser = (body: { fullName: string; email: string; password: string; role: string }) =>
+export const createAdminUser = (body: { fullName: string; email: string; password: string; role: string; organisationId?: string }) =>
   apiClient.post<AdminUser>('/admin/users', body)
 
 export const setAdminUserActive = (id: string, isActive: boolean) =>

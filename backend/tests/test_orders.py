@@ -41,8 +41,12 @@ def _negotiation(world, product, *, price="98.00", counter="98.75", quantity="12
     return negotiation
 
 
-def _place(client, world, negotiation, key="buyer"):
-    return client.post(f"{ORDERS}/from-negotiation/{negotiation.id}", headers=as_user(world, key))
+def _place(client, world, negotiation, key="buyer", pin="560076"):
+    return client.post(
+        f"{ORDERS}/from-negotiation/{negotiation.id}",
+        json={"destinationPin": pin, "freightBasis": "standard"},
+        headers=as_user(world, key),
+    )
 
 
 def test_order_snapshots_accepted_terms_and_total(client, world, product):
@@ -58,6 +62,13 @@ def test_order_snapshots_accepted_terms_and_total(client, world, product):
                                     "uom": "KG"}
     # 12,000.5 kg x 98.75 = 1,185,049.375 -> rounded half-up to 1,185,049.38
     assert order["totalValue"] == {"amount": "1185049.38", "currency": "INR"}
+    assert order["charges"]["material"]["amount"] == "1185049.3800"
+    assert order["charges"]["gstRatePercent"] == 18
+    assert order["charges"]["payable"]["amount"] != order["totalValue"]["amount"]
+    assert order["agreedPrice"]["unitPrice"]["amount"] == "98.7500"
+    assert order["destinationPin"] == "560076"
+    assert order["freightStatus"] in ("estimated", "on_request")
+    assert order["totalValue"]["amount"] != order.get("freight", {}).get("amount") if order.get("freight") else True
     assert order["negotiation"] == {"id": str(negotiation.id), "negotiationNumber": negotiation.negotiation_number,
                                     "acceptedVersionNumber": 2}
     assert order["createdAt"] and order["allowedActions"] == {"cancel": True}
@@ -117,7 +128,11 @@ def test_access_control(client, world, product):
     negotiation = _negotiation(world, product)
     assert _place(client, world, negotiation, key="supplier").status_code == 403
     other = _other_buyer(world)
-    stranger = client.post(f"{ORDERS}/from-negotiation/{negotiation.id}", headers=as_actor(other))
+    stranger = client.post(
+        f"{ORDERS}/from-negotiation/{negotiation.id}",
+        json={"destinationPin": "560076"},
+        headers=as_actor(other),
+    )
     assert stranger.status_code == 404
 
     order = _place(client, world, negotiation).json()
@@ -175,7 +190,7 @@ def test_terminal_orders_cannot_change(client, world, product, final):
         service.cancel_order(world.session, world.actors["buyer"], order_id)
     else:
         for status in (OrderStatus.CONFIRMED, OrderStatus.PROCESSING, OrderStatus.READY, OrderStatus.DISPATCHED,
-                       OrderStatus.DELIVERED):
+                       OrderStatus.IN_TRANSIT, OrderStatus.DELIVERED):
             service.advance_order(world.session, supplier, order_id, to_status=status)
     again = client.post(f"{ORDERS}/{order_id}/cancel", headers=as_user(world, "buyer"))
     assert again.status_code == 409 and again.json()["error"]["code"] == "ORDER_CLOSED"

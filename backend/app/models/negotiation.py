@@ -3,6 +3,7 @@ from datetime import date, datetime
 from decimal import Decimal
 
 from sqlalchemy import CheckConstraint, Date, DateTime, ForeignKey, Index, Integer, Numeric, String, Text, UniqueConstraint
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.clock import utcnow
@@ -32,6 +33,24 @@ class Negotiation(UUIDPrimaryKey, Timestamps, Base):
             name="snapshot_matches_state",
         ),
         CheckConstraint(
+            "destination_pin IS NULL OR destination_pin ~ '^[1-9][0-9]{5}$'",
+            name="destination_pin",
+        ),
+        CheckConstraint(
+            "freight_status IS NULL OR freight_status IN ('estimated', 'on_request')",
+            name="freight_status",
+        ),
+        CheckConstraint(
+            "freight_basis IS NULL OR freight_basis IN ('standard', 'distance')",
+            name="freight_basis",
+        ),
+        CheckConstraint(
+            "(freight_status IS NULL AND freight_amount IS NULL) OR "
+            "(freight_status = 'on_request' AND freight_amount IS NULL) OR "
+            "(freight_status = 'estimated' AND freight_amount IS NOT NULL)",
+            name="freight_amount_matches_status",
+        ),
+        CheckConstraint(
             "(status IN ('accepted', 'rejected', 'cancelled')) = (closed_at IS NOT NULL)",
             name="closed_iff_terminal",
         ),
@@ -55,6 +74,14 @@ class Negotiation(UUIDPrimaryKey, Timestamps, Base):
     benchmark_as_of: Mapped[date | None] = mapped_column(Date)
     benchmark_series_code: Mapped[str | None] = mapped_column(String(160))
     benchmark_basis: Mapped[str | None] = mapped_column(String(64))
+    destination_pin: Mapped[str | None] = mapped_column(String(6))
+    required_by: Mapped[date | None] = mapped_column(Date)
+    payment_terms: Mapped[str | None] = mapped_column(String(120))
+    requirements: Mapped[list | None] = mapped_column(JSONB)
+    freight_status: Mapped[str | None] = mapped_column(String(16))
+    freight_amount: Mapped[Decimal | None] = mapped_column(PRICE)
+    freight_match: Mapped[str | None] = mapped_column(String(16))
+    freight_basis: Mapped[str | None] = mapped_column(String(16))
 
     status: Mapped[str] = mapped_column(String(16))
     accepted_version_id: Mapped[uuid.UUID | None] = mapped_column(

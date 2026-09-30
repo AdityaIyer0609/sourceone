@@ -1,20 +1,26 @@
 """Negotiation V1 lifecycle.
 
-Benchmark = reference value (snapshotted once at creation). Offer = proposed price (an immutable
-version). Negotiated price = the accepted version's offered price. Nothing here edits pricing data.
+The reference value snapshotted at creation is the average of supplier asking prices when suppliers
+are listing the material, otherwise the published benchmark. Offer = proposed price (an immutable
+version). Negotiated price = the accepted version's offered price. Freight is an estimate for this
+order and is not part of the offered price.
 """
 
+import re
 import uuid
 from collections.abc import Sequence
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Literal
 
 from sqlalchemy import or_, select, text
 from sqlalchemy.orm import Session, selectinload
 
+from app.catalogue.specifications import requirement_snapshot
+from app.catalogue import market_average
 from app.catalogue import products as catalogue
 from app.core.clock import business_today, utcnow
+from app.freight import service as freight
 from app.core.errors import (
     AwaitingCounterparty,
     CurrencyUnitMismatch,
@@ -142,6 +148,52 @@ def _add_version(
     return version
 
 
+def _freight_fields(
+    session: Session,
+    supplier_user_id: uuid.UUID,
+    product_code: str,
+    quantity: Decimal,
+    destination_pin: str | None,
+    freight_basis: str,
+) -> dict:
+    """Estimate only. The amount is never written into the offered price."""
+    if not destination_pin:
+        return {}
+    pin = destination_pin.strip()
+    if not re.fullmatch(r"[1-9][0-9]{5}", pin):
+        raise ValidationFailed("Delivery PIN must be 6 digits", details={"destinationPin": pin})
+    if freight_basis not in ("standard", "distance"):
+        raise ValidationFailed("Choose normal freight or road distance", details={"freightBasis": freight_basis})
+    try:
+        result = freight.estimate(
+            session,
+            supplier_user_id=supplier_user_id,
+            product_code=product_code,
+            quantity=quantity,
+            destination_pin=pin,
+            include_distance=freight_basis == "distance",
+        )
+    except NotFound:
+        return {"destination_pin": pin, "freight_status": "on_request", "freight_basis": freight_basis}
+    if freight_basis == "distance":
+        estimated = result["distance_status"] == "estimated" and result["distance_freight"] is not None
+        return {
+            "destination_pin": pin,
+            "freight_status": "estimated" if estimated else "on_request",
+            "freight_amount": result["distance_freight"] if estimated else None,
+            "freight_match": "distance" if estimated else None,
+            "freight_basis": freight_basis,
+        }
+    estimated = result["freight"] is not None
+    return {
+        "destination_pin": pin,
+        "freight_status": "estimated" if estimated else "on_request",
+        "freight_amount": result["freight"] if estimated else None,
+        "freight_match": result["match"] if estimated else None,
+        "freight_basis": freight_basis,
+    }
+
+
 def create_negotiation(
     session: Session,
     actor: Actor,
@@ -153,6 +205,11 @@ def create_negotiation(
     message: str | None = None,
     currency: str | None = None,
     supplier_user_id: uuid.UUID | None = None,
+    destination_pin: str | None = None,
+    freight_basis: str = "standard",
+    required_by: date | None = None,
+    payment_terms: str | None = None,
+    requirements: list | None = None,
     now: datetime | None = None,
 ) -> Negotiation:
     actor.require(NegotiationPermission.BUY)
@@ -186,6 +243,16 @@ def create_negotiation(
                 benchmark_as_of=current.freshness.as_of_date,
             )
 
+    average = market_average.current_average(session, product.id, negotiation_currency)
+    if average is not None:
+        snapshot.update(
+            benchmark_state=BenchmarkSnapshotState.FRESH,
+            benchmark_rate_id=None,
+            benchmark_rate_snapshot=average,
+            benchmark_as_of=business_today(now),
+            benchmark_basis="ASKING_AVERAGE/GST_EXCLUDED",
+        )
+
     supplier = _resolve_supplier(session, supplier_user_id)
     if supplier.id == actor.user_id:
         raise ValidationFailed("Buyer and supplier must be different users")
@@ -199,9 +266,13 @@ def create_negotiation(
         uom=product.uom,
         currency=negotiation_currency,
         status=NegotiationStatus.DRAFT,
+        required_by=required_by,
+        payment_terms=(payment_terms or "").strip() or None,
+        requirements=requirements if requirements is not None else requirement_snapshot(product),
         created_at=now,
         updated_at=now,
         **snapshot,
+        **_freight_fields(session, supplier.id, product_code, quantity, destination_pin, freight_basis),
     )
     session.add(negotiation)
     session.flush()
@@ -332,3 +403,51 @@ def negotiated_version(negotiation: Negotiation) -> NegotiationVersion | None:
     if negotiation.accepted_version_id is None:
         return None
     return next(v for v in negotiation.versions if v.id == negotiation.accepted_version_id)
+
+
+def answer_requirement(
+    session: Session, actor: Actor, negotiation_id: uuid.UUID, key: str, *,
+    status: str, comment: str | None = None, now: datetime | None = None,
+) -> Negotiation:
+    """The supplier answers one frozen requirement. This does not change the product."""
+    from app.models.fulfilment import RequirementResponse
+
+    now = now or utcnow()
+    negotiation = get_negotiation(session, actor, negotiation_id, for_update=True)
+    if role_of(actor, negotiation) != "supplier":
+        raise PermissionDenied("Only the supplier on this negotiation can answer a requirement")
+    if negotiation.status in (NegotiationStatus.REJECTED, NegotiationStatus.CANCELLED):
+        raise NegotiationClosed("This negotiation is closed", details={"status": negotiation.status})
+    rows = negotiation.requirements or []
+    if key not in {row["key"] for row in rows}:
+        raise ValidationFailed("That requirement is not on this negotiation", details={"key": key})
+    if status not in ("met", "not_met"):
+        raise ValidationFailed("Say whether the requirement is met", details={"status": status})
+    note = (comment or "").strip() or None
+    if note is not None and len(note) > 500:
+        raise ValidationFailed("The comment is too long", details={"field": "comment"})
+    existing = session.scalar(
+        select(RequirementResponse).where(
+            RequirementResponse.negotiation_id == negotiation.id, RequirementResponse.requirement_key == key,
+        )
+    )
+    if existing is None:
+        session.add(RequirementResponse(
+            negotiation_id=negotiation.id, requirement_key=key, status=status, comment=note,
+            updated_by_user_id=actor.user_id, updated_at=now,
+        ))
+    else:
+        existing.status = status
+        existing.comment = note
+        existing.updated_by_user_id = actor.user_id
+        existing.updated_at = now
+    session.flush()
+    return negotiation
+
+
+def requirement_answers(session: Session, negotiation_id: uuid.UUID) -> list:
+    from app.models.fulfilment import RequirementResponse
+
+    return list(session.scalars(
+        select(RequirementResponse).where(RequirementResponse.negotiation_id == negotiation_id).order_by(RequirementResponse.requirement_key)
+    ).all())

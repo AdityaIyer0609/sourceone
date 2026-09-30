@@ -167,12 +167,16 @@ def test_supplier_price_and_negotiation_stay_separate_from_landed_cost(client, w
     assert started.status_code == 201, started.text
     negotiation = started.json()
     assert negotiation["versions"][0]["offeredPrice"] == {"amount": "100.2500", "currency": "INR"}
-    assert negotiation["benchmark"]["value"] == {"amount": "99.4000", "currency": "INR"}
+    assert negotiation["benchmark"]["value"] == {"amount": "100.2500", "currency": "INR"}
     countered = _offer(client, world, "supplier", negotiation["id"], "99.0000")
     assert countered.status_code == 201, countered.text
     accepted = client.post(f"/api/v1/negotiations/{negotiation['id']}/accept", headers=as_user(world, "buyer"))
     assert accepted.status_code == 200, accepted.text
-    order = client.post(f"/api/v1/orders/from-negotiation/{negotiation['id']}", headers=as_user(world, "buyer"))
+    order = client.post(
+        f"/api/v1/orders/from-negotiation/{negotiation['id']}",
+        json={"destinationPin": "682001"},
+        headers=as_user(world, "buyer"),
+    )
     assert order.status_code == 201, order.text
     body = order.json()
     assert body["agreedPrice"]["unitPrice"] == {"amount": "99.0000", "currency": "INR"}

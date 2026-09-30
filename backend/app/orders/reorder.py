@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.core.clock import utcnow
 from app.catalogue import listings as catalogue_listings
+from app.catalogue import market_average
 from app.catalogue import products as catalogue
 from app.core.errors import NotFound, ValidationFailed
 from app.freight import service as freight
@@ -58,6 +59,9 @@ def _benchmark(session: Session, order: Order) -> tuple[Decimal | None, str | No
     series = next((item for item in catalogue.buyer_series(product) if item.currency == order.currency), None)
     if series is None:
         return None, None
+    average = market_average.current_average(session, product.id, order.currency)
+    if average is not None:
+        return average, series.code
     current = read_model.resolve_current(repository.timelines(session, [series.id]).get(series.id, []), utcnow())
     value = current.benchmark.value if current.benchmark is not None else None
     return value, series.code

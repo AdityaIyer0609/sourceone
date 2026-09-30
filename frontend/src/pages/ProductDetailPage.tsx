@@ -1,5 +1,6 @@
 import { ArrowLeft, ArrowRight, History, MapPin, Minus, Plus, ReceiptText, ShieldCheck, Truck } from "lucide-react";
 import { useEffect, useState } from "react";
+import { onDeliveryPinChange, readDeliveryPin } from "../lib/deliveryPin";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { paths } from "../app/paths";
 import { AsyncContent } from "../components/feedback/AsyncContent";
@@ -9,10 +10,11 @@ import { OfferModal } from "../components/negotiation/OfferModal";
 import { LandedCostPreviewModal } from "../components/product/LandedCostPreviewModal";
 import { ProductCard } from "../components/product/ProductCard";
 import { ProductVisual } from "../components/product/ProductVisual";
+import { OrgLink } from "../components/supplier/OrgLink";
 import { Badge, Button, Heading, Input } from "../components/ui";
 import { getErrorMessage } from "../lib/api/client";
 import { getMaterialEstimate, type BenchmarkSummary } from "../lib/api/pricing";
-import { listProductListings } from "../lib/api/listings";
+import { listProductListings, listSupplierMatches } from "../lib/api/listings";
 import { startNegotiation } from "../lib/api/negotiations";
 import { getProduct, listProducts, selectPricing } from "../lib/api/products";
 import { answerProductQuestion, askProductQuestion, downloadProductDocument, listProductDocuments, listProductQuestions } from "../lib/api/productContent";
@@ -28,14 +30,14 @@ function useDebounced<T>(value: T, delayMs: number) {
   return debounced;
 }
 
-function EstimateSummary({ benchmark, quantity }: { benchmark: BenchmarkSummary | null; quantity: number }) {
+function EstimateSummary({ benchmark, quantity, averaged }: { benchmark: BenchmarkSummary | null; quantity: number; averaged: boolean }) {
   const debouncedQuantity = useDebounced(quantity, 350);
   const valid = Number.isFinite(debouncedQuantity) && debouncedQuantity > 0;
   const estimate = useApiQuery(
     benchmark?.current && valid ? `estimate:${benchmark.seriesCode}:${debouncedQuantity}` : null,
     (signal) => getMaterialEstimate(benchmark?.seriesCode ?? "", debouncedQuantity, benchmark?.unit.code, signal),
   );
-  const label = "Estimated material value at Plenza benchmark";
+  const label = averaged ? "Estimated material value at the average supplier asking price" : "Estimated material value at Plenza benchmark";
 
   if (!benchmark?.current || estimate.data?.availability === "rate_on_request") {
     return <div className="cost-summary"><span>{label}</span><strong>Rate on request</strong><small>No valid Plenza benchmark is in effect for this product.</small></div>;
@@ -64,7 +66,8 @@ export function ProductDetailPage() {
   const { sku = "" } = useParams();
   const [searchParams] = useSearchParams();
   const [quantity, setQuantity] = useState(5000);
-  const [destinationPin, setDestinationPin] = useState("");
+  const [destinationPin, setDestinationPin] = useState(readDeliveryPin);
+  useEffect(() => onDeliveryPinChange(() => setDestinationPin(readDeliveryPin())), []);
   const [calculatorOpen, setCalculatorOpen] = useState(false);
   const [negotiateOpen, setNegotiateOpen] = useState(false);
   const [tab, setTab] = useState<"specifications" | "supply" | "documents" | "questions">("specifications");
@@ -81,12 +84,26 @@ export function ProductDetailPage() {
     id: listing.supplierUserId,
     name: listing.supplierName,
     organisation: listing.organisation,
+    organisationId: listing.organisationId,
     askingPrice: listing.askingPrice.amount,
     originPin: listing.originPin,
     originLabel: listing.originLabel,
     minimumQuantity: listing.minimumQuantity,
     availability: listing.availability,
   }));
+  const debouncedQuantity = useDebounced(quantity, 350);
+  const debouncedPin = useDebounced(destinationPin, 350);
+  const pinOk = /^[1-9][0-9]{5}$/.test(debouncedPin);
+  const supplierMatches = useApiQuery(
+    product && pinOk && debouncedQuantity > 0 ? `matches:${product.productCode}:${debouncedQuantity}:${debouncedPin}:${benchmark?.currency ?? ""}` : null,
+    (signal) => listSupplierMatches(product?.productCode ?? "", {
+      quantity: String(debouncedQuantity),
+      uom: product?.uom.code ?? "KG",
+      destinationPin: debouncedPin,
+      currency: benchmark?.currency,
+    }, signal),
+  );
+  const matched = supplierMatches.data?.matches ?? [];
   const moq = offers.length ? `${Number(Math.min(...offers.map((offer) => Number(offer.minimumQuantity)))).toLocaleString("en-IN")} ${product?.uom.code.toLowerCase()}` : "—";
   const documents = useApiQuery(product ? `documents:${product.productCode}` : null, (signal) => listProductDocuments(product?.productCode ?? "", signal));
   const questionList = useApiQuery(product ? `questions:${product.productCode}` : null, (signal) => listProductQuestions(product?.productCode ?? "", signal));
@@ -116,15 +133,17 @@ export function ProductDetailPage() {
                 const field = product.specifications.find((item) => item.key === key);
                 return <span key={key}><small>{field?.label ?? key}</small><strong>{field?.value ?? "Not specified"}</strong></span>;
               })}<span><small>MOQ</small><strong>{moq}</strong></span></div>
-              {offers.length > 0 && <div className="spec-strip">{offers.map((offer) => <span key={offer.id}><small>{offer.organisation} · {titleCase(offer.availability ?? "")}</small><strong>Asking {formatMoney({ amount: offer.askingPrice ?? "0", currency: benchmark?.currency ?? "INR" })} · MOQ {Number(offer.minimumQuantity).toLocaleString("en-IN")}</strong></span>)}</div>}
+              {matched.length > 0 ? <div className="spec-strip">{matched.map((match) => <span key={match.supplierUserId}><small><OrgLink organisationId={match.organisationId}>{match.organisation}</OrgLink> · {match.meetsMinimum ? "Minimum met" : "Below minimum"}</small><strong>{match.reasons.find((reason) => reason.startsWith("Freight")) ?? formatMoney(match.askingPrice)}</strong></span>)}</div> : offers.length > 0 && <div className="spec-strip">{offers.map((offer) => <span key={offer.id}><small><OrgLink organisationId={offer.organisationId}>{offer.organisation}</OrgLink> · {titleCase(offer.availability ?? "")}</small><strong>Asking {formatMoney({ amount: offer.askingPrice ?? "0", currency: benchmark?.currency ?? "INR" })} · MOQ {Number(offer.minimumQuantity).toLocaleString("en-IN")}</strong></span>)}</div>}
               <div className="rate-module">
                 <small>PLENZA BENCHMARK {stale ? <Badge tone="warning">STALE</Badge> : benchmark?.current && <span className="live-dot" />}</small>
                 <div className="rate-module__row">
                   <Price value={benchmark?.current?.value ?? null} uom={benchmark?.unit.label ?? product.uom.label} change={benchmark?.movement.state === "ok" ? benchmark.movement.percent : null} />
-                  <small>{direction && benchmark?.movement.percent != null ? `vs previous ${formatPercent(benchmark.movement.percent)}` : "No previous benchmark"}</small>
+                  <small>{direction && benchmark?.movement.percent != null ? `vs previous ${formatPercent(benchmark.movement.percent)}` : offers.length > 0 ? "No previous average" : "No previous benchmark"}</small>
                 </div>
                 <p>
-                  {benchmark?.current
+                  {offers.length > 0 && benchmark?.current
+                    ? `Average of ${offers.length} supplier asking ${offers.length === 1 ? "price" : "prices"}${benchmark.spread.state === "ok" && benchmark.spread.minimum && benchmark.spread.maximum ? ` · spread ${formatMoney(benchmark.spread.minimum)}–${formatMoney(benchmark.spread.maximum)}` : offers.length === 1 ? " · spread unavailable" : ""} · ${benchmark.market.label} · freight is added after a supplier is chosen`
+                    : benchmark?.current
                     ? `${benchmark.priceBasis.label} ${benchmark.market.label} · ${benchmark.taxBasis.label} · As of ${formatDate(benchmark.current.freshness.asOfDate)}`
                     : benchmark ? `${benchmark.market.label} · No valid benchmark is in effect · Rate on request` : "No Plenza benchmark is mapped to this product · Rate on request"}
                   {otherMarkets.length > 0 && ` · Also benchmarked: ${otherMarkets.join(", ")}`}
@@ -134,7 +153,7 @@ export function ProductDetailPage() {
               <div className="procure-box">
                 <div className="quantity-field"><label>Required quantity</label><div><Button variant="ghost" onClick={() => setQuantity(Math.max(500, quantity - 500))}><Minus size={16} /></Button><Input value={quantity} onChange={(e) => setQuantity(Number(e.target.value))} /><span>{product.uom.code}</span><Button variant="ghost" onClick={() => setQuantity(quantity + 500)}><Plus size={16} /></Button></div></div>
                 <div className="delivery-field"><label>Delivery PIN</label><div><MapPin size={17} /><Input value={destinationPin} onChange={(event) => setDestinationPin(event.target.value)} /></div></div>
-                <EstimateSummary benchmark={benchmark} quantity={quantity} />
+                <EstimateSummary benchmark={benchmark} quantity={quantity} averaged={offers.length > 0} />
                 <Button onClick={() => setCalculatorOpen(true)}>Calculate landed cost <ArrowRight size={17} /></Button>
                 <Button variant="secondary" disabled={offers.length === 0} title={offers.length === 0 ? "No supplier is listing this product" : undefined} onClick={() => setNegotiateOpen(true)}>Request negotiated rate</Button>
                 <Button variant="secondary" onClick={() => navigate(`${paths.purchaseRequests}?product=${encodeURIComponent(product.productCode)}&quantity=${encodeURIComponent(String(quantity))}&pin=${encodeURIComponent(destinationPin)}`)}>Create purchase request</Button>
@@ -154,7 +173,8 @@ export function ProductDetailPage() {
               <Button variant="ghost" className={tab === "questions" ? "is-active" : ""} onClick={() => setTab("questions")}>Q&A</Button>
             </div>
             {tab === "specifications" && <div className="spec-grid">{product.specifications.map((field) => <div key={field.key} className={field.key === "description" ? "spec-grid__wide" : undefined}><small>{field.label}</small><strong>{field.value ?? "Not specified"}</strong></div>)}</div>}
-            {tab === "supply" && (offers.length > 0 ? <div className="spec-grid">{offers.map((offer) => <div key={offer.id}><small>{offer.organisation} · {titleCase(offer.availability ?? "")}</small><strong>Asking {formatMoney({ amount: offer.askingPrice ?? "0", currency: benchmark?.currency ?? "INR" })} · MOQ {Number(offer.minimumQuantity).toLocaleString("en-IN")} {product.uom.code}</strong></div>)}</div> : <EmptyState title="No active listings" message="No supplier is listing this product." />)}
+            {tab === "supply" && (matched.length > 0 ? <div className="spec-grid">{matched.map((match) => <div key={match.supplierUserId}><small><OrgLink organisationId={match.organisationId}>{match.organisation}</OrgLink> · {titleCase(match.availability)}</small><strong>Asking {formatMoney(match.askingPrice)} · MOQ {Number(match.minimumQuantity).toLocaleString("en-IN")} {product.uom.code}</strong><ul className="match-reasons">{match.reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul></div>)}</div> : offers.length > 0 ? <div className="spec-grid">{offers.map((offer) => <div key={offer.id}><small><OrgLink organisationId={offer.organisationId}>{offer.organisation}</OrgLink> · {titleCase(offer.availability ?? "")}</small><strong>Asking {formatMoney({ amount: offer.askingPrice ?? "0", currency: benchmark?.currency ?? "INR" })} · MOQ {Number(offer.minimumQuantity).toLocaleString("en-IN")} {product.uom.code}</strong></div>)}</div> : <EmptyState title="No active listings" message="No supplier is listing this product." />)}
+            {tab === "supply" && !pinOk && <p className="request-note">Enter a 6-digit delivery PIN to see why each supplier matches, including freight.</p>}
             {tab === "documents" && (
               <AsyncContent isLoading={documents.isLoading && !documents.data} error={documents.error} onRetry={documents.reload} isEmpty={!documents.isLoading && !documents.error && (documents.data ?? []).length === 0} emptyTitle="No documents" emptyMessage="No documents are on file for this product." loadingLabel="Loading documents…">
                 <div className="spec-grid">{(documents.data ?? []).map((document) => <div key={document.id}><small>{document.documentType}</small><strong>{document.name}</strong><Button variant="ghost" onClick={() => void downloadProductDocument(product.productCode, document.id, document.filename).catch((cause) => setContentError(getErrorMessage(cause)))}>Download</Button></div>)}</div>
@@ -191,6 +211,8 @@ export function ProductDetailPage() {
           initialQuantity={String(quantity)}
           submitLabel="Submit offer"
           suppliers={offers}
+          productCode={product.productCode}
+          initialPin={destinationPin}
           onClose={() => setNegotiateOpen(false)}
           onSubmit={async (input) => {
             const negotiation = await startNegotiation({

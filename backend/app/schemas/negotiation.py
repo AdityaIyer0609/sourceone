@@ -5,12 +5,13 @@ from typing import Literal
 
 from pydantic import Field
 
-from app.schemas.pricing import ApiModel, Money
+from app.schemas.pricing import ApiModel, Money, QuotePositionOut
 
 
 class PartyOut(ApiModel):
     name: str
     organisation: str
+    organisation_id: uuid.UUID
 
 
 class NegotiationProductOut(ApiModel):
@@ -58,6 +59,18 @@ class AllowedActionsOut(ApiModel):
     cancel: bool
 
 
+class RequirementOut(ApiModel):
+    key: str
+    label: str
+    value: str
+
+
+class RequirementResponseOut(ApiModel):
+    key: str
+    status: Literal["met", "not_met"]
+    comment: str | None
+
+
 class NegotiationOut(ApiModel):
     id: uuid.UUID
     negotiation_number: str
@@ -68,7 +81,9 @@ class NegotiationOut(ApiModel):
     currency: str
     buyer: PartyOut
     supplier: PartyOut
+    supplier_user_id: uuid.UUID
     benchmark: BenchmarkSnapshotOut
+    quote: QuotePositionOut
     versions: list[VersionOut]
     negotiated: NegotiatedPriceOut | None
     awaiting: Literal["buyer", "supplier"] | None
@@ -78,6 +93,15 @@ class NegotiationOut(ApiModel):
     updated_at: datetime
     closed_at: datetime | None
     closed_reason: str | None
+    destination_pin: str | None = None
+    freight_status: Literal["estimated", "on_request"] | None = None
+    freight: Money | None = None
+    freight_match: str | None = None
+    freight_basis: Literal["standard", "distance"] | None = None
+    required_by: date | None = None
+    payment_terms: str | None = None
+    requirements: list[RequirementOut] = []
+    requirement_responses: list[RequirementResponseOut] = []
 
 
 class SupplierOptionOut(ApiModel):
@@ -94,6 +118,8 @@ class CreateNegotiationIn(ApiModel):
     currency: str | None = None
     message: str | None = Field(default=None, max_length=2000)
     supplier_user_id: uuid.UUID | None = None
+    destination_pin: str | None = None
+    freight_basis: Literal["standard", "distance"] = "standard"
 
 
 class OfferIn(ApiModel):
@@ -102,6 +128,11 @@ class OfferIn(ApiModel):
     currency: str | None = None
     uom: str | None = None
     message: str | None = Field(default=None, max_length=2000)
+
+
+class RequirementAnswerIn(ApiModel):
+    status: Literal["met", "not_met"]
+    comment: str | None = Field(default=None, max_length=500)
 
 
 class CloseIn(ApiModel):

@@ -43,7 +43,7 @@ def test_supplier_progresses_through_full_flow(client, world, product):
 
     final = response.json()
     assert final["nextStatus"] is None and final["canProgress"] is False
-    assert [s["state"] for s in final["steps"]] == ["completed"] * 5 + ["current"]
+    assert [s["state"] for s in final["steps"]] == ["completed"] * (len(FULFILMENT_FLOW) - 1) + ["current"]
     assert final["steps"][2]["note"] == "now processing" and final["steps"][2]["changedBy"]
     assert client.get(f"{ORDERS}/{order_id}", headers=as_user(world, "buyer")).json()["status"] == "delivered"
 
@@ -96,7 +96,7 @@ def test_cancelled_and_delivered_orders_cannot_progress(client, world, product):
     assert view["status"] == "cancelled" and view["nextStatus"] is None
     states = {s["status"]: s["state"] for s in view["steps"]}
     assert states == {"placed": "completed", "confirmed": "completed", "processing": "pending", "ready": "pending",
-                      "dispatched": "pending", "delivered": "pending", "cancelled": "current"}
+                      "dispatched": "pending", "in_transit": "pending", "delivered": "pending", "cancelled": "current"}
     assert view["events"][-1]["note"] == "No longer needed" and view["events"][-1]["changedByRole"] == "buyer"
 
     delivered = _order(client, world, product)
@@ -151,5 +151,7 @@ def test_tracking_history_is_ordered_and_matches_current_status(client, world, p
     assert stamps == sorted(stamps)
     assert view["events"][-1]["toStatus"] == view["status"] == "ready"
     assert view["lastUpdatedAt"] == stamps[-1]
-    assert [s["state"] for s in view["steps"]] == ["completed", "completed", "completed", "current", "pending", "pending"]
+    assert [s["state"] for s in view["steps"]] == [
+        "completed", "completed", "completed", "current", "pending", "pending", "pending",
+    ]
     assert all(s["at"] is None for s in view["steps"][4:])

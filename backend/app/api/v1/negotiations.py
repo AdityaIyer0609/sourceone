@@ -5,9 +5,11 @@ from decimal import Decimal
 from typing import Annotated
 
 from fastapi import APIRouter, Depends
+from sqlalchemy.orm import Session
 
 from app.api.deps import DbSession, require_any
-from app.api.v1.pricing_presenters import money
+from app.api.v1.pricing_presenters import money, quote_position
+from app.catalogue import market_average
 from app.identity.service import Actor
 from app.models.negotiation import Negotiation, NegotiationVersion
 from app.negotiation import service
@@ -24,7 +26,9 @@ def quantity_text(value: Decimal) -> str:
 
 
 def party_out(user) -> schemas.PartyOut:
-    return schemas.PartyOut(name=user.full_name, organisation=user.organisation.name)
+    return schemas.PartyOut(
+        name=user.full_name, organisation=user.organisation.name, organisation_id=user.organisation_id,
+    )
 
 
 def _version(negotiation: Negotiation, version: NegotiationVersion) -> schemas.VersionOut:
@@ -40,8 +44,10 @@ def _version(negotiation: Negotiation, version: NegotiationVersion) -> schemas.V
     )
 
 
-def _present(actor: Actor, negotiation: Negotiation) -> schemas.NegotiationOut:
+def _present(actor: Actor, db: Session, negotiation: Negotiation) -> schemas.NegotiationOut:
     accepted = service.negotiated_version(negotiation)
+    latest = negotiation.versions[-1] if negotiation.versions else None
+    average = market_average.current_average(db, negotiation.product_id, negotiation.currency)
     return schemas.NegotiationOut(
         id=negotiation.id,
         negotiation_number=negotiation.negotiation_number,
@@ -55,12 +61,19 @@ def _present(actor: Actor, negotiation: Negotiation) -> schemas.NegotiationOut:
         currency=negotiation.currency,
         buyer=party_out(negotiation.buyer),
         supplier=party_out(negotiation.supplier),
+        supplier_user_id=negotiation.supplier_user_id,
         benchmark=schemas.BenchmarkSnapshotOut(
             state=negotiation.benchmark_state,
             value=money(negotiation.benchmark_rate_snapshot, negotiation.currency),
             as_of_date=negotiation.benchmark_as_of,
             series_code=negotiation.benchmark_series_code,
             basis=negotiation.benchmark_basis,
+        ),
+        quote=quote_position(
+            latest.offered_price if latest is not None else None,
+            negotiation.benchmark_rate_snapshot,
+            average,
+            negotiation.currency,
         ),
         versions=[_version(negotiation, v) for v in negotiation.versions],
         negotiated=schemas.NegotiatedPriceOut(
@@ -76,6 +89,18 @@ def _present(actor: Actor, negotiation: Negotiation) -> schemas.NegotiationOut:
         updated_at=negotiation.updated_at,
         closed_at=negotiation.closed_at,
         closed_reason=negotiation.closed_reason,
+        destination_pin=negotiation.destination_pin,
+        freight_status=negotiation.freight_status,
+        freight=money(negotiation.freight_amount, negotiation.currency) if negotiation.freight_amount is not None else None,
+        freight_match=negotiation.freight_match,
+        freight_basis=negotiation.freight_basis,
+        required_by=negotiation.required_by,
+        payment_terms=negotiation.payment_terms,
+        requirements=[schemas.RequirementOut(**row) for row in (negotiation.requirements or [])],
+        requirement_responses=[
+            schemas.RequirementResponseOut(key=row.requirement_key, status=row.status, comment=row.comment)
+            for row in service.requirement_answers(db, negotiation.id)
+        ],
     )
 
 
@@ -84,10 +109,11 @@ def create_negotiation(body: schemas.CreateNegotiationIn, db: DbSession, actor: 
     negotiation = service.create_negotiation(
         db, actor, product_code=body.product_code, series_code=body.series_code, quantity=body.quantity,
         offered_price=body.offered_price, message=body.message, currency=body.currency,
-        supplier_user_id=body.supplier_user_id,
+        supplier_user_id=body.supplier_user_id, destination_pin=body.destination_pin,
+        freight_basis=body.freight_basis,
     )
     db.commit()
-    return _present(actor, service.get_negotiation(db, actor, negotiation.id))
+    return _present(actor, db, service.get_negotiation(db, actor, negotiation.id))
 
 
 @router.get("/suppliers", response_model=list[schemas.SupplierOptionOut])
@@ -100,12 +126,12 @@ def list_suppliers(db: DbSession, actor: Participant):
 
 @router.get("", response_model=list[schemas.NegotiationOut])
 def list_negotiations(db: DbSession, actor: Participant, status: NegotiationStatus | None = None):
-    return [_present(actor, n) for n in service.list_negotiations(db, actor, status=status)]
+    return [_present(actor, db, n) for n in service.list_negotiations(db, actor, status=status)]
 
 
 @router.get("/{negotiation_id}", response_model=schemas.NegotiationOut)
 def get_negotiation(negotiation_id: uuid.UUID, db: DbSession, actor: Participant):
-    return _present(actor, service.get_negotiation(db, actor, negotiation_id))
+    return _present(actor, db, service.get_negotiation(db, actor, negotiation_id))
 
 
 @router.post("/{negotiation_id}/offers", response_model=schemas.NegotiationOut, status_code=201)
@@ -115,25 +141,36 @@ def make_offer(negotiation_id: uuid.UUID, body: schemas.OfferIn, db: DbSession, 
         currency=body.currency, uom=body.uom,
     )
     db.commit()
-    return _present(actor, negotiation)
+    return _present(actor, db, negotiation)
+
+
+@router.post("/{negotiation_id}/requirements/{key}", response_model=schemas.NegotiationOut)
+def answer_requirement(
+    negotiation_id: uuid.UUID, key: str, body: schemas.RequirementAnswerIn, db: DbSession, actor: Participant,
+):
+    negotiation = service.answer_requirement(
+        db, actor, negotiation_id, key, status=body.status, comment=body.comment,
+    )
+    db.commit()
+    return _present(actor, db, negotiation)
 
 
 @router.post("/{negotiation_id}/accept", response_model=schemas.NegotiationOut)
 def accept(negotiation_id: uuid.UUID, db: DbSession, actor: Participant):
     negotiation = service.accept_offer(db, actor, negotiation_id)
     db.commit()
-    return _present(actor, negotiation)
+    return _present(actor, db, negotiation)
 
 
 @router.post("/{negotiation_id}/reject", response_model=schemas.NegotiationOut)
 def reject(negotiation_id: uuid.UUID, db: DbSession, actor: Participant, body: schemas.CloseIn | None = None):
     negotiation = service.reject_offer(db, actor, negotiation_id, reason=body.reason if body else None)
     db.commit()
-    return _present(actor, negotiation)
+    return _present(actor, db, negotiation)
 
 
 @router.post("/{negotiation_id}/cancel", response_model=schemas.NegotiationOut)
 def cancel(negotiation_id: uuid.UUID, db: DbSession, actor: Participant, body: schemas.CloseIn | None = None):
     negotiation = service.cancel_negotiation(db, actor, negotiation_id, reason=body.reason if body else None)
     db.commit()
-    return _present(actor, negotiation)
+    return _present(actor, db, negotiation)
