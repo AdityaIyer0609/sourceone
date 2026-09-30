@@ -1,4 +1,4 @@
-import { Settings2, Sparkles, X } from "lucide-react";
+import { Settings2, X } from "lucide-react";
 import { NavLink } from "react-router-dom";
 import { commerceNav, controlCentreNav, visibleNav, type NavItem } from "../../app/navigation";
 import { paths } from "../../app/paths";
@@ -50,10 +50,6 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
         {control.length > 0 && <small className="nav-kicker nav-kicker--spaced">CONTROL CENTRE</small>}
         {control.map((item) => <SidebarLink key={item.to} item={item} onNavigate={onClose} />)}
       </nav>
-      <div className="sidebar__support">
-        <div className="support-icon"><Sparkles size={18} /></div>
-        <div><strong>Procurement desk</strong><small>No live desk is connected</small></div>
-      </div>
       <div className="user-strip">
         <div className="avatar">{initials(name)}</div>
         <div><strong>{name}</strong><small>{session?.user.email}</small></div>

@@ -219,7 +219,7 @@ export function PurchaseRequestsWorkspace() {
                           <tr key={row.supplierUserId}>
                             <td><strong><OrgLink organisationId={row.organisationId}>{row.organisation}</OrgLink></strong><small>{row.supplierName}</small></td>
                             <td>{row.askingPrice ? formatMoney(row.askingPrice) : "—"}</td>
-                            <td>{row.latestOffer ? formatMoney(row.latestOffer) : "—"}{row.quote.versusSnapshot && <small>{formatSignedMoney(row.quote.versusSnapshot)} vs snapshot</small>}{row.quote.versusAverage && <small>{formatSignedMoney(row.quote.versusAverage)} vs average</small>}</td>
+                            <td>{row.latestOffer ? formatMoney(row.latestOffer) : "—"}{row.quote.versusAverage && <small>{formatSignedMoney(row.quote.versusAverage)} vs market avg</small>}</td>
                             <td>{row.materialValue ? formatMoney(row.materialValue, 2) : "—"}</td>
                             <td>{row.freightStatus === "estimated" && row.freight ? formatMoney(row.freight) : "On request"}</td>
                             <td>{row.charges ? formatMoney(row.charges.gst, 2) : "—"}</td>

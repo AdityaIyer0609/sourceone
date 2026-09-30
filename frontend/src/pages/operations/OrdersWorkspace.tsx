@@ -54,9 +54,10 @@ function OrderModal({ order, onClose, onChanged }: { order: Order; onClose: () =
     }
   };
   const [documentType, setDocumentType] = useState<string>(ORDER_DOCUMENT_TYPES[0][0]);
+  const [uploadName, setUploadName] = useState("");
   const freightKnown = order.freightStatus === "estimated" && order.freight ? order.freight : null;
   return (
-    <Modal open title={`Order ${order.orderNumber}`} onClose={onClose}>
+    <Modal open className="modal--wide" title={`Order ${order.orderNumber}`} onClose={onClose}>
       <div className="modal-product"><ProductVisual glyph={BENCHMARK_GLYPH} /><div><strong>{order.product.name}</strong><small>{order.buyer.organisation} ↔ <OrgLink organisationId={order.supplier.organisationId}>{order.supplier.organisation}</OrgLink></small></div><OrderStatusBadge status={order.status} /></div>
       <div className="modal-cost">
         <Row label="Quantity">{quantityText(order.quantity, order.uom)}</Row>
@@ -85,20 +86,33 @@ function OrderModal({ order, onClose, onChanged }: { order: Order; onClose: () =
           </div>
         ))}
       </div>
-      {order.documents.length === 0 && <p className="request-note">No fulfilment documents have been uploaded.</p>}
-      {order.viewerRole === "supplier" && order.status !== "cancelled" && (
-        <div className="form-grid">
-          <label>Document type
-            <select className="input" aria-label="Document type" value={documentType} onChange={(event) => setDocumentType(event.target.value)}>
-              {ORDER_DOCUMENT_TYPES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-            </select>
-          </label>
-          <label>File<Input aria-label="Fulfilment file" type="file" onChange={(event) => {
-            const file = event.target.files?.[0];
-            if (!file) return;
-            setBusy(true);
-            uploadOrderDocument(order.id, documentType, file).then(onChanged).catch((cause) => setError(cause)).finally(() => setBusy(false));
-          }} /></label>
+      {(order.documents.length === 0 || (order.viewerRole === "supplier" && order.status !== "cancelled")) && (
+        <div className="doc-upload">
+          {order.documents.length === 0 && <p className="request-note">No fulfilment documents have been uploaded.</p>}
+          {order.viewerRole === "supplier" && order.status !== "cancelled" && (
+            <div className="form-grid">
+              <label>Document type
+                <select className="field-select" aria-label="Document type" value={documentType} disabled={busy} onChange={(event) => setDocumentType(event.target.value)}>
+                  {ORDER_DOCUMENT_TYPES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                </select>
+              </label>
+              <label>File
+                <span className="file-field">
+                  <input className="file-field__input" aria-label="Fulfilment file" type="file" disabled={busy} onChange={(event) => {
+                    const file = event.target.files?.[0];
+                    event.target.value = "";
+                    if (!file) return;
+                    setUploadName(file.name);
+                    setBusy(true);
+                    setError(null);
+                    uploadOrderDocument(order.id, documentType, file).then(onChanged).catch((cause) => setError(cause)).finally(() => { setBusy(false); setUploadName(""); });
+                  }} />
+                  <span className="file-field__button">{busy ? "Uploading" : "Choose file"}</span>
+                  <span className="file-field__name">{busy && uploadName ? uploadName : "No file chosen"}</span>
+                </span>
+              </label>
+            </div>
+          )}
         </div>
       )}
       {tracking.data ? <OrderTimeline steps={tracking.data.steps} /> : tracking.error ? <p className="negative" role="alert">{getErrorMessage(tracking.error)}</p> : null}
