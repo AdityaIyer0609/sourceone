@@ -123,6 +123,7 @@ class NegotiationVersion(UUIDPrimaryKey, Base):
     quantity: Mapped[Decimal] = mapped_column(QUANTITY)
     uom: Mapped[str] = mapped_column(String(16))
     message: Mapped[str | None] = mapped_column(Text)
+    delivery_date: Mapped[date | None] = mapped_column(Date)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     negotiation: Mapped[Negotiation] = relationship(back_populates="versions", foreign_keys=[negotiation_id])

@@ -10,6 +10,7 @@ service layer, so the seeded data obeys the same lifecycle and four-eyes rules a
 import argparse
 import math
 import sys
+import uuid
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 
@@ -26,8 +27,11 @@ from app.identity.passwords import hash_password
 from app.identity.service import actor_for
 from app.models.catalogue import Grade, GradeEquivalence, Market, MarketAlias, Producer, ProducerGradeAlias, Product
 from app.freight.constants import DEFAULT_RATE_PER_KM
-from app.models.freight import FreightDistanceRate, FreightRule
+from app.models.freight import FreightDistanceRate, FreightRule, SupplierFreightKmRate, SupplierFreightLane
+from app.models.fulfilment import OrderDocument
 from app.models.listing import AskingPriceAverage, SupplierListing
+from app.models.negotiation import Negotiation, NegotiationVersion
+from app.models.order import Order
 from app.models.identity import Organisation, Role, User, UserRole
 from app.models.pricing import RateSeries, RateSource, SourceRate
 from app.negotiation import service as negotiation_service
@@ -40,7 +44,7 @@ ERP_SOURCE_CODE = "ERP-DOMESTICPRICE1-DEMO"
 DEMO_NOTE = "DEMO FIXTURE: synthetic rows shaped like ERP DomesticPrice1; not from a live ERP connection."
 
 DEMO_TABLES = (
-    "product_answers", "product_questions", "product_documents", "requirement_responses", "order_documents", "purchase_request_suppliers", "purchase_requests", "pin_coordinates", "road_distances", "freight_distance_rates", "freight_defaults", "freight_rules", "asking_price_averages", "supplier_listings", "erp_price_row_imports", "erp_grades", "erp_customers", "erp_sync_runs", "order_status_events", "order_approvals", "orders", "negotiation_versions", "negotiations", "product_rate_series", "products", "pricing_audit_events", "benchmark_rate_inputs", "benchmark_rates", "source_rates", "import_batches",
+    "product_answers", "product_questions", "product_documents", "requirement_responses", "order_documents", "purchase_request_suppliers", "purchase_requests", "pin_coordinates", "road_distances", "supplier_freight_km_rates", "supplier_freight_lanes", "freight_distance_rates", "freight_defaults", "freight_rules", "asking_price_averages", "supplier_listings", "erp_price_row_imports", "erp_grades", "erp_customers", "erp_sync_runs", "order_status_events", "order_approvals", "orders", "negotiation_versions", "negotiations", "product_rate_series", "product_submissions", "products", "pricing_audit_events", "benchmark_rate_inputs", "benchmark_rates", "source_rates", "import_batches",
     "rate_series", "rate_sources", "market_aliases", "grade_equivalence", "producer_grade_aliases",
     "markets", "grades", "producers", "user_roles", "users", "organisations",
 )
@@ -170,7 +174,7 @@ PRODUCT_SPECS = {
     "PP-MULTIFIL-A": {"grade": "PP Multifilament", "application": "Multifilament", "quality": "Prime", "mfi": "12 g/10 min", "density": "0.905 g/cm3"},
     "LDPE-LAM-A": {"grade": "LDPE Lamination", "application": "Lamination", "quality": "Prime", "mfi": "4 g/10 min", "density": "0.923 g/cm3"},
     "LLDPE-LINER-A": {"grade": "LLDPE Liner", "application": "Liner", "quality": "Prime", "mfi": "1.0 g/10 min", "density": "0.918 g/cm3"},
-    "PP-RAFFIA-IMP-A": {"grade": "PP Raffia", "producer": "Borouge", "application": "Raffia", "quality": "Prime", "mfi": "3.0 g/10 min", "density": "0.900 g/cm3"},
+    "PP-RAFFIA-IMP-A": {"grade": "PP Raffia", "application": "Raffia", "quality": "Prime", "mfi": "3.0 g/10 min", "density": "0.900 g/cm3"},
 }
 # Development password for the seeded sign-in accounts. Not a production secret.
 DEMO_PASSWORD = "SourceOne-demo"
@@ -197,6 +201,15 @@ ORGANISATIONS = [
     ("ZENITH", "Zenith Polymers (demo supplier)", "supplier"),
     ("HARBOUR", "Harbour Polytrade (demo supplier)", "supplier"),
 ]
+def listing_cap(availability: str, minimum) -> Decimal | None:
+    """Demo limited offers need a spare-quantity cap. Five tonnes covers the seeded minimums."""
+    if availability != "limited":
+        return None
+    floor = Decimal(minimum)
+    cap = Decimal("5000")
+    return floor if floor > cap else cap
+
+
 # Asking prices are the supplier's own offers. They are not ERP prices and not SourceOne benchmarks.
 LISTINGS = [
     ("supplier", "PP-RAFFIA-A", "500", "100.2500", "INR", "in_stock", True),
@@ -361,6 +374,7 @@ def _reference_data(session: Session) -> dict:
         session.add(SupplierListing(
             supplier_user_id=users[user_key].id, product_id=catalogue[product_code].id, uom="KG",
             minimum_quantity=Decimal(minimum), asking_price=Decimal(price), currency=currency,
+            maximum_quantity=listing_cap(availability, minimum),
             availability=availability, is_active=active,
         ))
     session.flush()
@@ -453,6 +467,7 @@ def seed(session: Session) -> dict:
     )
     session.flush()
     _negotiations(session, users)
+    ensure_supplier_history(session)
     ensure_market_month(session)
     ensure_demo_freight(session)
     return {"batches": len(batch_dates), "pending_iocl_draft": str(iocl_draft.id)}
@@ -553,6 +568,94 @@ def _negotiations(session: Session, users: dict) -> None:
         at += STEP
 
 
+# accepted, rejected, orders, cancelled orders, reply hours, rejected files, accepted files.
+# Enough rows for the comparison to use acceptance, cancellation, replies, and documents.
+SUPPLIER_HISTORY = {
+    "mira@demo.sourceone": (6, 4, 6, 3, 80, 2, 1),
+    "leela@demo.sourceone": (8, 2, 5, 0, 6, 0, 3),
+    "neil@harbour.demo": (5, 3, 5, 2, 30, 1, 2),
+    "supplier@demo.sourceone": (4, 0, 2, 0, 4, 0, 0),
+}
+
+
+def ensure_supplier_history(session: Session) -> int:
+    """Add decided negotiations and orders so supplier history is visible. Skips a supplier who already has this sample."""
+    buyer_user = session.scalar(select(User).where(User.email == "buyer@demo.sourceone"))
+    product = session.scalar(select(Product).where(Product.product_code == "PP-RAFFIA-A"))
+    if buyer_user is None or product is None:
+        return 0
+    buyer = actor_for(session, buyer_user)
+    added = 0
+    cursor = utcnow() - timedelta(days=45)
+    for email, (accepted, rejected, orders, cancelled, reply_hours, rejected_files, accepted_files) in SUPPLIER_HISTORY.items():
+        supplier_user = session.scalar(select(User).where(User.email == email))
+        if supplier_user is None:
+            continue
+        marked = session.scalar(select(NegotiationVersion.id).join(
+            Negotiation, Negotiation.id == NegotiationVersion.negotiation_id,
+        ).where(
+            Negotiation.supplier_user_id == supplier_user.id,
+            NegotiationVersion.message.like("Demo history.%"),
+        ))
+        if marked is not None:
+            continue
+        supplier = actor_for(session, supplier_user)
+        outcomes = ["accept"] * accepted + ["reject"] * rejected
+        order_slots = orders
+        cancel_slots = cancelled
+        document_order = None
+        for index, outcome in enumerate(outcomes, start=1):
+            start = cursor
+            replied = start + timedelta(hours=reply_hours)
+            closed = replied + timedelta(minutes=20)
+            negotiation = negotiation_service.create_negotiation(
+                session, buyer, product_code=product.product_code, quantity=Decimal("500"),
+                offered_price=Decimal("100.0000"), supplier_user_id=supplier_user.id,
+                destination_pin="390020", message=f"Demo history. Sample {index} for {email}.", now=start,
+            )
+            negotiation_service.make_offer(
+                session, supplier, negotiation.id, price=Decimal("101.0000"),
+                message="Demo history. Supplier reply.", now=replied,
+            )
+            if outcome == "accept":
+                negotiation_service.accept_offer(session, buyer, negotiation.id, now=closed)
+                if order_slots > 0:
+                    placed = order_service.create_from_negotiation(
+                        session, buyer, negotiation.id, destination_pin="390020", now=closed + timedelta(minutes=10),
+                    )
+                    order_slots -= 1
+                    if isinstance(placed, Order):
+                        if cancel_slots > 0:
+                            order_service.cancel_order(
+                                session, buyer, placed.id, now=closed + timedelta(minutes=30),
+                                reason="Demo history. Buyer cancelled this lot.",
+                            )
+                            cancel_slots -= 1
+                        elif document_order is None:
+                            document_order = placed
+            else:
+                negotiation_service.reject_offer(
+                    session, buyer, negotiation.id, now=closed, reason="Demo history. Offer declined.",
+                )
+            added += 1
+            cursor = closed + timedelta(hours=2)
+        if document_order is not None and rejected_files + accepted_files > 0:
+            _history_files(session, document_order, supplier_user, buyer_user, rejected_files, accepted_files)
+    session.flush()
+    return added
+
+
+def _history_files(session: Session, order: Order, supplier: User, buyer: User, rejected: int, accepted: int) -> None:
+    reviewed = order.updated_at
+    for index, status in enumerate(["rejected"] * rejected + ["accepted"] * accepted):
+        session.add(OrderDocument(
+            order_id=order.id, document_type="coa", stored_name=uuid.uuid4().hex,
+            filename=f"coa-{status}-{index + 1}.pdf", content_type="application/pdf", byte_size=1200,
+            status=status, uploaded_by_user_id=supplier.id, reviewed_by_user_id=buyer.id,
+            created_at=reviewed, reviewed_at=reviewed,
+        ))
+
+
 def ensure_demo_freight(session: Session) -> int:
     """Add SourceOne freight lanes for the demo suppliers. Does not read ERP freight."""
     for code, (pin, label) in DISPATCH.items():
@@ -581,6 +684,46 @@ def ensure_demo_freight(session: Session) -> int:
         added += 1
     if session.scalar(select(FreightDistanceRate).where(FreightDistanceRate.currency == "INR")) is None:
         session.add(FreightDistanceRate(currency="INR", rate_per_km=DEFAULT_RATE_PER_KM, minimum_freight=None, is_active=True))
+        added += 1
+    added += _supplier_freight(session)
+    return added
+
+
+def _supplier_freight(session: Session) -> int:
+    """Copy demo lanes onto the supplier who dispatches from that origin. Not ERP freight."""
+    owners = {pin: code for code, (pin, _label) in DISPATCH.items()}
+    added = 0
+    for origin_pin, _origin_label, destination_pin, destination_label, rate, currency, minimum, active, _effective_from in FREIGHT_RULES:
+        if currency != "INR" or not active or len(origin_pin) != 6 or len(destination_pin) != 6:
+            continue
+        code = owners.get(origin_pin)
+        if code is None:
+            continue
+        org = session.scalar(select(Organisation).where(Organisation.code == code))
+        if org is None:
+            continue
+        exists = session.scalar(select(SupplierFreightLane.id).where(
+            SupplierFreightLane.organisation_id == org.id,
+            SupplierFreightLane.origin_pin == origin_pin,
+            SupplierFreightLane.destination_pin == destination_pin,
+            SupplierFreightLane.currency == currency,
+        ))
+        if exists is not None:
+            continue
+        session.add(SupplierFreightLane(
+            organisation_id=org.id, origin_pin=origin_pin, destination_pin=destination_pin,
+            destination_label=destination_label, rate_per_kg=Decimal(rate), currency=currency,
+            minimum_freight=Decimal(minimum) if minimum else None, is_active=True,
+        ))
+        added += 1
+    coastline = session.scalar(select(Organisation).where(Organisation.code == "COASTLINE"))
+    if coastline is not None and session.scalar(select(SupplierFreightKmRate.id).where(
+        SupplierFreightKmRate.organisation_id == coastline.id, SupplierFreightKmRate.currency == "INR",
+    )) is None:
+        session.add(SupplierFreightKmRate(
+            organisation_id=coastline.id, currency="INR", rate_per_km=Decimal("12.0000"),
+            minimum_freight=None, is_active=True,
+        ))
         added += 1
     return added
 
@@ -648,6 +791,7 @@ def ensure_demo_listings(session: Session) -> int:
         session.add(SupplierListing(
             supplier_user_id=users[user_key].id, product_id=product.id, uom="KG",
             minimum_quantity=Decimal(minimum), asking_price=Decimal(price), currency=currency,
+            maximum_quantity=listing_cap(availability, minimum),
             availability=availability, is_active=active,
         ))
         added += 1
@@ -740,6 +884,7 @@ def _write_market_month(session: Session, users: dict) -> int:
                 listing = SupplierListing(
                     supplier_user_id=user.id, product_id=product.id, uom="KG",
                     minimum_quantity=Decimal(minimum), asking_price=Decimal(end), currency=currency,
+                    maximum_quantity=listing_cap(availability, minimum),
                     availability=availability, is_active=True,
                 )
                 session.add(listing)
@@ -747,6 +892,7 @@ def _write_market_month(session: Session, users: dict) -> int:
                 listing.asking_price = Decimal(end)
                 listing.is_active = True
                 listing.availability = availability
+                listing.maximum_quantity = listing_cap(availability, listing.minimum_quantity)
                 listing.currency = currency
             paths.append(_price_path(start, end, MARKET_HISTORY_DAYS, phases[user_key]))
         if not paths:
@@ -783,10 +929,11 @@ def main() -> int:
             points = ensure_market_month(session)
             freight = ensure_demo_freight(session)
             specs = ensure_demo_specifications(session)
+            history = ensure_supplier_history(session)
             session.commit()
             total = session.scalar(text("SELECT count(*) FROM supplier_listings"))
             lanes = session.scalar(text("SELECT count(*) FROM freight_rules"))
-            print(f"Demo data already present. Sign-in accounts updated: {accounts}. Supplier listings added: {added}. Market-rate points written: {points}. supplier_listings: {total}. Freight rules added: {freight}. freight_rules: {lanes}. Specifications filled: {specs}")
+            print(f"Demo data already present. Sign-in accounts updated: {accounts}. Supplier listings added: {added}. Market-rate points written: {points}. supplier_listings: {total}. Freight rules added: {freight}. freight_rules: {lanes}. Specifications filled: {specs}. Supplier history rows added: {history}")
             return 0
         summary = seed(session)
         session.commit()

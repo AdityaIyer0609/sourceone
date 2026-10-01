@@ -48,6 +48,7 @@ class RequestSupplierOut(ApiModel):
     charges: ChargeOut | None
     quote: QuotePositionOut
     requirement_responses: list[RequirementResponseOut] = []
+    supply_note: str | None = None
 
 
 class PurchaseRequestOut(ApiModel):

@@ -119,7 +119,7 @@ export function SupplierProfilePage() {
                     <tr key={item.productCode}>
                       <td><Link className="org-link" to={paths.productDetail(item.productCode)}><strong>{item.name}</strong></Link><small>{item.productCode}</small></td>
                       <td>{formatMoney(item.askingPrice)}</td>
-                      <td>{Number(item.minimumQuantity).toLocaleString("en-IN")} {item.uom.toLowerCase()}</td>
+                      <td>{item.availability === "limited" && item.maximumQuantity ? `${Number(item.minimumQuantity).toLocaleString("en-IN")}–${Number(item.maximumQuantity).toLocaleString("en-IN")}` : Number(item.minimumQuantity).toLocaleString("en-IN")} {item.uom.toLowerCase()}</td>
                       <td>{titleCase(item.availability)}</td>
                     </tr>
                   ))}

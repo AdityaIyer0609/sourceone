@@ -252,6 +252,7 @@ def profile(session: Session, actor: Actor, organisation_id: uuid.UUID) -> dict:
                 "name": row.product.name,
                 "uom": row.uom,
                 "minimum_quantity": f"{row.minimum_quantity.normalize():f}",
+                "maximum_quantity": f"{row.maximum_quantity.normalize():f}" if row.maximum_quantity is not None else None,
                 "asking_price": {"amount": f"{row.asking_price:.4f}", "currency": row.currency},
                 "availability": row.availability,
             }

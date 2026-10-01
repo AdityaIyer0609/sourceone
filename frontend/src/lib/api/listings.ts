@@ -15,6 +15,7 @@ export interface SupplierListing {
   originLabel: string | null
   uom: string
   minimumQuantity: string
+  maximumQuantity: string | null
   askingPrice: Money
   availability: ListingAvailability
   isActive: boolean
@@ -24,12 +25,13 @@ export const listOwnListings = (signal?: AbortSignal) => apiClient.get<SupplierL
 
 export const updateListing = (
   id: string,
-  body: { askingPrice?: string; minimumQuantity?: string; availability?: ListingAvailability; isActive?: boolean },
+  body: { askingPrice?: string; minimumQuantity?: string; maximumQuantity?: string | null; availability?: ListingAvailability; isActive?: boolean },
 ) => apiClient.patch<SupplierListing>(`/listings/${id}`, body)
 
 export const createListing = (body: {
   productCode: string
   minimumQuantity: string
+  maximumQuantity?: string | null
   askingPrice: string
   currency: string
   availability: ListingAvailability
@@ -49,6 +51,7 @@ export interface SupplierMatch {
   organisationId: string
   askingPrice: Money
   minimumQuantity: string
+  maximumQuantity: string | null
   uom: string
   availability: ListingAvailability
   originPin: string | null
@@ -58,6 +61,16 @@ export interface SupplierMatch {
   freight: Money | null
   freightMatch: 'lane' | 'zone' | 'default' | null
   reasons: string[]
+  comparison: {
+    basis: 'lane' | 'per_km' | null
+    freight: Money | null
+    material: Money
+    landed: Money | null
+    factor: string | null
+    adjusted: Money | null
+    notes: string[]
+    place: number | null
+  }
 }
 
 export interface SupplierMatchList {

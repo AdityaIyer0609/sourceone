@@ -5,9 +5,12 @@ from decimal import Decimal, ROUND_HALF_UP
 from typing import Annotated
 
 from fastapi import APIRouter, Depends
+from sqlalchemy import select
 
 from app.api.deps import DbSession, require_any
 from app.api.v1.negotiations import quantity_text
+from app.catalogue.listings import supply_note
+from app.models.listing import SupplierListing
 from app.api.v1.pricing_presenters import money, quote_position
 from app.catalogue import market_average
 from app.identity.service import Actor
@@ -41,6 +44,16 @@ def _charges(material: Decimal, freight: Decimal | None, currency: str) -> Charg
 def _value(amount: Decimal, currency: str) -> Money:
     rounded = amount.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
     return Money(amount=f"{rounded:.4f}", currency=currency)
+
+
+def _supply_note(db: DbSession, request: PurchaseRequest, supplier_user_id: uuid.UUID) -> str | None:
+    listing = db.scalar(select(SupplierListing).where(
+        SupplierListing.supplier_user_id == supplier_user_id,
+        SupplierListing.product_id == request.product_id,
+    ))
+    if listing is None:
+        return None
+    return supply_note(listing, request.quantity)
 
 
 def _present(actor: Actor, request: PurchaseRequest, db: DbSession) -> PurchaseRequestOut:
@@ -94,6 +107,7 @@ def _present(actor: Actor, request: PurchaseRequest, db: DbSession) -> PurchaseR
                 RequirementResponseOut(key=answer.requirement_key, status=answer.status, comment=answer.comment)
                 for answer in (negotiations.requirement_answers(db, negotiation.id) if negotiation is not None else [])
             ],
+            supply_note=_supply_note(db, request, row.supplier_user_id),
         ))
     return PurchaseRequestOut(
         id=request.id,

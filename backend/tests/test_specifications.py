@@ -35,13 +35,13 @@ def test_specifications_are_returned_from_the_product(client, world):
     assert values["quality"] == "Prime"
     assert values["uom"] == "KG"
     assert values["description"] == "RAF description"
-    assert values["producer"] is None and values["density"] is None
+    assert "producer" not in values and values["density"] is None
 
 
 def test_missing_specifications_are_empty(client, world):
     code = _create(client, world, "BARE")
     values = _values(client, world, code)
-    assert values["grade"] is None and values["producer"] is None
+    assert values["grade"] is None and "producer" not in values
     assert values["mfi"] is None and values["density"] is None
     assert "AISI" not in str(values) and "ASTM" not in str(values)
     edited = client.patch(f"{ITEMS}/{code}", json={
@@ -59,8 +59,8 @@ def test_products_keep_their_own_specifications(client, world):
     film = _create(client, world, "TWO", grade="LLDPE Liner", mfi="1.0 g/10 min", producer="Borouge")
     assert _values(client, world, raffia)["mfi"] == "3.0 g/10 min"
     assert _values(client, world, film)["mfi"] == "1.0 g/10 min"
-    assert _values(client, world, film)["producer"] == "Borouge"
-    assert _values(client, world, raffia)["producer"] is None
+    assert "producer" not in _values(client, world, film)
+    assert "Borouge" not in _values(client, world, film).values()
 
 
 def test_inactive_product_stays_hidden(client, world, product):

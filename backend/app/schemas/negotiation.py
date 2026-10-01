@@ -41,6 +41,7 @@ class VersionOut(ApiModel):
     quantity: str
     uom: str
     message: str | None
+    delivery_date: date | None = None
     created_at: datetime
 
 
@@ -102,6 +103,8 @@ class NegotiationOut(ApiModel):
     payment_terms: str | None = None
     requirements: list[RequirementOut] = []
     requirement_responses: list[RequirementResponseOut] = []
+    supply_note: str | None = None
+    delivery_note: str | None = None
 
 
 class SupplierOptionOut(ApiModel):
@@ -128,6 +131,7 @@ class OfferIn(ApiModel):
     currency: str | None = None
     uom: str | None = None
     message: str | None = Field(default=None, max_length=2000)
+    delivery_date: date | None = None
 
 
 class RequirementAnswerIn(ApiModel):

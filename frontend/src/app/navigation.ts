@@ -14,6 +14,7 @@ import {
   ShoppingBag,
   Store,
   Truck,
+  User,
   Users,
   type LucideIcon,
 } from 'lucide-react'
@@ -47,6 +48,7 @@ export const commerceNav: NavItem[] = [
   { label: 'Order Tracking', to: paths.orderTracking, icon: PackageCheck, roles: trading },
   { label: 'Reorder', to: paths.reorder, icon: RefreshCw, roles: buying },
   { label: 'Listings', to: paths.listings, icon: Tags, roles: supplying },
+  { label: 'Your freight', to: paths.supplierFreight, icon: Truck, roles: supplying },
   { label: 'Approvals', to: paths.approvals, icon: ClipboardCheck, roles: ['approver'] },
 ]
 
@@ -58,6 +60,10 @@ export const controlCentreNav: NavItem[] = [
   { label: 'Freight', to: paths.freightManagement, icon: Truck, roles: pricing },
   { label: 'User Management', to: paths.users, icon: Users, roles: ['platform_admin'] },
   { label: 'Company', to: paths.company, icon: Building2, roles: ['approver'] },
+]
+
+export const accountNav: NavItem[] = [
+  { label: 'Profile', to: paths.profile, icon: User, roles: view },
 ]
 
 export function canAccess(roles: readonly string[], allowed: readonly string[]) {

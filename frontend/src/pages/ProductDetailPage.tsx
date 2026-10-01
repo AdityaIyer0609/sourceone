@@ -10,6 +10,7 @@ import { OfferModal } from "../components/negotiation/OfferModal";
 import { LandedCostPreviewModal } from "../components/product/LandedCostPreviewModal";
 import { ProductCard } from "../components/product/ProductCard";
 import { ProductVisual } from "../components/product/ProductVisual";
+import { SupplierComparison } from "../components/product/SupplierComparison";
 import { OrgLink } from "../components/supplier/OrgLink";
 import { Badge, Button, Heading, Input } from "../components/ui";
 import { getErrorMessage } from "../lib/api/client";
@@ -89,6 +90,7 @@ export function ProductDetailPage() {
     originPin: listing.originPin,
     originLabel: listing.originLabel,
     minimumQuantity: listing.minimumQuantity,
+    maximumQuantity: listing.maximumQuantity,
     availability: listing.availability,
   }));
   const debouncedQuantity = useDebounced(quantity, 350);
@@ -133,7 +135,19 @@ export function ProductDetailPage() {
                 const field = product.specifications.find((item) => item.key === key);
                 return <span key={key}><small>{field?.label ?? key}</small><strong>{field?.value ?? "Not specified"}</strong></span>;
               })}<span><small>MOQ</small><strong>{moq}</strong></span></div>
-              {matched.length > 0 ? <div className="spec-strip">{matched.map((match) => <span key={match.supplierUserId}><small><OrgLink organisationId={match.organisationId}>{match.organisation}</OrgLink> · {match.meetsMinimum ? "Minimum met" : "Below minimum"}</small><strong>{match.reasons.find((reason) => reason.startsWith("Freight")) ?? formatMoney(match.askingPrice)}</strong></span>)}</div> : offers.length > 0 && <div className="spec-strip">{offers.map((offer) => <span key={offer.id}><small><OrgLink organisationId={offer.organisationId}>{offer.organisation}</OrgLink> · {titleCase(offer.availability ?? "")}</small><strong>Asking {formatMoney({ amount: offer.askingPrice ?? "0", currency: benchmark?.currency ?? "INR" })} · MOQ {Number(offer.minimumQuantity).toLocaleString("en-IN")}</strong></span>)}</div>}
+              {matched.length === 0 && offers.length > 0 && <div className="spec-strip">{offers.map((offer) => <span key={offer.id}><small><OrgLink organisationId={offer.organisationId}>{offer.organisation}</OrgLink> · {titleCase(offer.availability ?? "")}</small><strong>Asking {formatMoney({ amount: offer.askingPrice ?? "0", currency: benchmark?.currency ?? "INR" })} · {offer.availability === "limited" && offer.maximumQuantity ? `${Number(offer.minimumQuantity).toLocaleString("en-IN")}–${Number(offer.maximumQuantity).toLocaleString("en-IN")}` : `MOQ ${Number(offer.minimumQuantity).toLocaleString("en-IN")}`}</strong></span>)}</div>}
+              <div className="procure-box">
+                <div className="quantity-field"><label>Required quantity</label><div><Button variant="ghost" onClick={() => setQuantity(Math.max(500, quantity - 500))}><Minus size={16} /></Button><Input value={quantity} onChange={(e) => setQuantity(Number(e.target.value))} /><span>{product.uom.code}</span><Button variant="ghost" onClick={() => setQuantity(quantity + 500)}><Plus size={16} /></Button></div></div>
+                <div className="delivery-field"><label>Delivery PIN</label><div><MapPin size={17} /><Input value={destinationPin} onChange={(event) => setDestinationPin(event.target.value)} /></div></div>
+                <EstimateSummary benchmark={benchmark} quantity={quantity} averaged={offers.length > 0} />
+                <Button onClick={() => setCalculatorOpen(true)}>Calculate landed cost <ArrowRight size={17} /></Button>
+                <Button variant="secondary" disabled={offers.length === 0} title={offers.length === 0 ? "No supplier is listing this product" : undefined} onClick={() => setNegotiateOpen(true)}>Request negotiated rate</Button>
+                <Button variant="secondary" onClick={() => navigate(`${paths.purchaseRequests}?product=${encodeURIComponent(product.productCode)}&quantity=${encodeURIComponent(String(quantity))}&pin=${encodeURIComponent(destinationPin)}`)}>Create purchase request</Button>
+              </div>
+              <div className="assurance-row"><span><ShieldCheck size={18} /><strong>{product.listingCount} {product.listingCount === 1 ? "supplier" : "suppliers"}</strong><small>Active listings</small></span><span><Truck size={18} /><strong>{product.availability === "available" ? "Benchmark live" : "Rate on request"}</strong><small>{benchmark?.current ? `As of ${formatDate(benchmark.current.freshness.asOfDate)}` : "No current benchmark"}</small></span><span><ReceiptText size={18} /><strong>{offers.length ? "Listed" : "No listing"}</strong><small>{offers.length ? `${offers.length} eligible in this currency` : "No supplier is listing this product"}</small></span></div>
+            </section>
+            <div className="product-wide">
+              {matched.length > 0 && <SupplierComparison matches={matched} pin={debouncedPin} quantity={debouncedQuantity} uom={product.uom.code} onAsk={(supplierUserId) => navigate(`${paths.purchaseRequests}?product=${encodeURIComponent(product.productCode)}&quantity=${encodeURIComponent(String(quantity))}&pin=${encodeURIComponent(destinationPin)}&supplier=${encodeURIComponent(supplierUserId)}`)} />}
               <div className="rate-module">
                 <small>PLENZA BENCHMARK {stale ? <Badge tone="warning">STALE</Badge> : benchmark?.current && <span className="live-dot" />}</small>
                 <div className="rate-module__row">
@@ -150,16 +164,7 @@ export function ProductDetailPage() {
                 </p>
                 <Button variant="ghost" disabled={!benchmark} onClick={() => benchmark && navigate(`${paths.liveRates}?series=${encodeURIComponent(benchmark.seriesCode)}`)}><History size={16} /> Rate history</Button>
               </div>
-              <div className="procure-box">
-                <div className="quantity-field"><label>Required quantity</label><div><Button variant="ghost" onClick={() => setQuantity(Math.max(500, quantity - 500))}><Minus size={16} /></Button><Input value={quantity} onChange={(e) => setQuantity(Number(e.target.value))} /><span>{product.uom.code}</span><Button variant="ghost" onClick={() => setQuantity(quantity + 500)}><Plus size={16} /></Button></div></div>
-                <div className="delivery-field"><label>Delivery PIN</label><div><MapPin size={17} /><Input value={destinationPin} onChange={(event) => setDestinationPin(event.target.value)} /></div></div>
-                <EstimateSummary benchmark={benchmark} quantity={quantity} averaged={offers.length > 0} />
-                <Button onClick={() => setCalculatorOpen(true)}>Calculate landed cost <ArrowRight size={17} /></Button>
-                <Button variant="secondary" disabled={offers.length === 0} title={offers.length === 0 ? "No supplier is listing this product" : undefined} onClick={() => setNegotiateOpen(true)}>Request negotiated rate</Button>
-                <Button variant="secondary" onClick={() => navigate(`${paths.purchaseRequests}?product=${encodeURIComponent(product.productCode)}&quantity=${encodeURIComponent(String(quantity))}&pin=${encodeURIComponent(destinationPin)}`)}>Create purchase request</Button>
-              </div>
-              <div className="assurance-row"><span><ShieldCheck size={18} /><strong>{product.listingCount} {product.listingCount === 1 ? "supplier" : "suppliers"}</strong><small>Active listings</small></span><span><Truck size={18} /><strong>{product.availability === "available" ? "Benchmark live" : "Rate on request"}</strong><small>{benchmark?.current ? `As of ${formatDate(benchmark.current.freshness.asOfDate)}` : "No current benchmark"}</small></span><span><ReceiptText size={18} /><strong>{offers.length ? "Listed" : "No listing"}</strong><small>{offers.length ? `${offers.length} eligible in this currency` : "No supplier is listing this product"}</small></span></div>
-            </section>
+            </div>
           </div>
         )}
       </AsyncContent>
@@ -172,8 +177,8 @@ export function ProductDetailPage() {
               <Button variant="ghost" className={tab === "documents" ? "is-active" : ""} onClick={() => setTab("documents")}>Documents</Button>
               <Button variant="ghost" className={tab === "questions" ? "is-active" : ""} onClick={() => setTab("questions")}>Q&A</Button>
             </div>
-            {tab === "specifications" && <div className="spec-grid">{product.specifications.map((field) => <div key={field.key} className={field.key === "description" ? "spec-grid__wide" : undefined}><small>{field.label}</small><strong>{field.value ?? "Not specified"}</strong></div>)}</div>}
-            {tab === "supply" && (matched.length > 0 ? <div className="spec-grid">{matched.map((match) => <div key={match.supplierUserId}><small><OrgLink organisationId={match.organisationId}>{match.organisation}</OrgLink> · {titleCase(match.availability)}</small><strong>Asking {formatMoney(match.askingPrice)} · MOQ {Number(match.minimumQuantity).toLocaleString("en-IN")} {product.uom.code}</strong><ul className="match-reasons">{match.reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul></div>)}</div> : offers.length > 0 ? <div className="spec-grid">{offers.map((offer) => <div key={offer.id}><small><OrgLink organisationId={offer.organisationId}>{offer.organisation}</OrgLink> · {titleCase(offer.availability ?? "")}</small><strong>Asking {formatMoney({ amount: offer.askingPrice ?? "0", currency: benchmark?.currency ?? "INR" })} · MOQ {Number(offer.minimumQuantity).toLocaleString("en-IN")} {product.uom.code}</strong></div>)}</div> : <EmptyState title="No active listings" message="No supplier is listing this product." />)}
+            {tab === "specifications" && <div className="spec-grid">{product.specifications.filter((field) => field.key !== "producer").map((field) => <div key={field.key} className={field.key === "description" ? "spec-grid__wide" : undefined}><small>{field.label}</small><strong>{field.value ?? "Not specified"}</strong></div>)}</div>}
+            {tab === "supply" && (matched.length > 0 ? <div className="spec-grid">{matched.map((match) => <div key={match.supplierUserId}><small><OrgLink organisationId={match.organisationId}>{match.organisation}</OrgLink> · {titleCase(match.availability)}</small><strong>Asking {formatMoney(match.askingPrice)} · {match.availability === "limited" && match.maximumQuantity ? `${Number(match.minimumQuantity).toLocaleString("en-IN")}–${Number(match.maximumQuantity).toLocaleString("en-IN")}` : `MOQ ${Number(match.minimumQuantity).toLocaleString("en-IN")}`} {product.uom.code}</strong><ul className="match-reasons">{match.reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul></div>)}</div> : offers.length > 0 ? <div className="spec-grid">{offers.map((offer) => <div key={offer.id}><small><OrgLink organisationId={offer.organisationId}>{offer.organisation}</OrgLink> · {titleCase(offer.availability ?? "")}</small><strong>Asking {formatMoney({ amount: offer.askingPrice ?? "0", currency: benchmark?.currency ?? "INR" })} · {offer.availability === "limited" && offer.maximumQuantity ? `${Number(offer.minimumQuantity).toLocaleString("en-IN")}–${Number(offer.maximumQuantity).toLocaleString("en-IN")}` : `MOQ ${Number(offer.minimumQuantity).toLocaleString("en-IN")}`} {product.uom.code}</strong></div>)}</div> : <EmptyState title="No active listings" message="No supplier is listing this product." />)}
             {tab === "supply" && !pinOk && <p className="request-note">Enter a 6-digit delivery PIN to see why each supplier matches, including freight.</p>}
             {tab === "documents" && (
               <AsyncContent isLoading={documents.isLoading && !documents.data} error={documents.error} onRetry={documents.reload} isEmpty={!documents.isLoading && !documents.error && (documents.data ?? []).length === 0} emptyTitle="No documents" emptyMessage="No documents are on file for this product." loadingLabel="Loading documents…">

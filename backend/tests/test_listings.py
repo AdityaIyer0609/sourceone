@@ -47,7 +47,7 @@ def test_inactive_listing_and_inactive_supplier_are_hidden(client, world, produc
 
 
 def test_buyer_sees_only_eligible_listings_for_the_product(client, world, product):
-    _create(client, world, product, askingPrice="101.0000", availability="limited")
+    _create(client, world, product, askingPrice="101.0000", availability="limited", maximumQuantity="2000")
     other_listing = _create(client, world, product, key="supplier", minimumQuantity="250")
     assert other_listing.status_code == 422
     visible = client.get(
@@ -95,3 +95,39 @@ def test_price_edit_updates_the_listing_and_the_average_not_a_benchmark(client, 
     own = client.get(LISTINGS, headers=as_user(world, "supplier")).json()
     assert created["id"] in {row["id"] for row in own}
     assert client.get(LISTINGS, headers=as_user(world, "buyer")).status_code == 403
+
+
+def test_limited_cap_is_information_and_other_listings_have_none(client, world, product):
+    missing = _create(client, world, product, availability="limited")
+    assert missing.status_code == 422
+    created = _create(client, world, product, availability="limited", maximumQuantity="800")
+    assert created.status_code == 201, created.text
+    assert created.json()["maximumQuantity"] == "800"
+    rejected = client.patch(
+        f"{LISTINGS}/{created.json()['id']}",
+        json={"availability": "in_stock", "maximumQuantity": "800"},
+        headers=as_user(world, "supplier"),
+    )
+    assert rejected.status_code == 422
+    stock = client.patch(
+        f"{LISTINGS}/{created.json()['id']}",
+        json={"availability": "in_stock", "maximumQuantity": None},
+        headers=as_user(world, "supplier"),
+    )
+    assert stock.status_code == 200 and stock.json()["maximumQuantity"] is None
+    limited = client.patch(
+        f"{LISTINGS}/{created.json()['id']}",
+        json={"availability": "limited", "maximumQuantity": "800"},
+        headers=as_user(world, "supplier"),
+    )
+    assert limited.status_code == 200, limited.text
+    matches = client.get(
+        f"/api/v1/products/{product.product_code}/supplier-matches",
+        headers=as_user(world, "buyer"),
+        params={"quantity": "900", "uom": "KG", "destinationPin": "560001"},
+    )
+    assert matches.status_code == 200, matches.text
+    [row] = matches.json()["matches"]
+    assert row["meetsMinimum"] is True
+    assert row["maximumQuantity"] == "800"
+    assert any("can spare" in reason for reason in row["reasons"])

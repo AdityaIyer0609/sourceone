@@ -128,9 +128,50 @@ def _check_offer_terms(negotiation: Negotiation, currency: str | None, uom: str 
         )
 
 
+def _latest_supplier_date(negotiation: Negotiation) -> date | None:
+    for version in reversed(negotiation.versions):
+        if version.delivery_date is not None:
+            return version.delivery_date
+    return None
+
+
+def delivery_note(negotiation: Negotiation) -> str | None:
+    """How the supplier's latest stated date sits against the buyer's fixed request."""
+    if negotiation.required_by is None:
+        return None
+    stated = _latest_supplier_date(negotiation)
+    if stated is None:
+        return "Delivery date has not been offered"
+    delta = (stated - negotiation.required_by).days
+    if delta == 0:
+        return "On the requested date"
+    days = abs(delta)
+    unit = "day" if days == 1 else "days"
+    if delta < 0:
+        return f"{days} {unit} before the requested date"
+    return f"{days} {unit} after the requested date"
+
+
+def _supplier_delivery_date(negotiation: Negotiation, actor: Actor, supplied: date | None) -> date | None:
+    """Only a supplier states a date. A later offer keeps the previous date when they leave it unchanged."""
+    if role_of(actor, negotiation) != "supplier":
+        if supplied is not None:
+            raise ValidationFailed(
+                "The requested delivery date is fixed. Only the supplier states a delivery date.",
+                details={"field": "deliveryDate"},
+            )
+        return None
+    if supplied is not None:
+        return supplied
+    previous = _latest_supplier_date(negotiation)
+    if negotiation.required_by is not None and previous is None:
+        raise ValidationFailed("State the date you can deliver", details={"field": "deliveryDate"})
+    return previous
+
+
 def _add_version(
     session: Session, negotiation: Negotiation, actor: Actor, *, price: Decimal, quantity: Decimal,
-    message: str | None, now: datetime,
+    message: str | None, now: datetime, delivery_date: date | None = None,
 ) -> NegotiationVersion:
     version = NegotiationVersion(
         negotiation_id=negotiation.id,
@@ -141,6 +182,7 @@ def _add_version(
         quantity=quantity,
         uom=negotiation.uom,
         message=(message or "").strip() or None,
+        delivery_date=delivery_date,
         created_at=now,
     )
     session.add(version)
@@ -336,15 +378,19 @@ def _participant_move(actor: Actor, negotiation: Negotiation, action: str) -> Ro
 
 def make_offer(
     session: Session, actor: Actor, negotiation_id: uuid.UUID, *, price: Decimal, quantity: Decimal | None = None,
-    message: str | None = None, currency: str | None = None, uom: str | None = None, now: datetime | None = None,
+    message: str | None = None, currency: str | None = None, uom: str | None = None,
+    delivery_date: date | None = None, now: datetime | None = None,
 ) -> Negotiation:
     now = now or utcnow()
     negotiation = get_negotiation(session, actor, negotiation_id, for_update=True)
     _participant_move(actor, negotiation, "offer")
     _check_offer_terms(negotiation, currency, uom)
     latest = _latest(negotiation)
-    _add_version(session, negotiation, actor, price=price,
-                 quantity=quantity or (latest.quantity if latest else negotiation.quantity), message=message, now=now)
+    _add_version(
+        session, negotiation, actor, price=price,
+        quantity=quantity or (latest.quantity if latest else negotiation.quantity), message=message, now=now,
+        delivery_date=_supplier_delivery_date(negotiation, actor, delivery_date),
+    )
     negotiation.status = NegotiationStatus.OPEN if negotiation.status == NegotiationStatus.DRAFT else NegotiationStatus.COUNTERED
     negotiation.updated_at = now
     session.flush()

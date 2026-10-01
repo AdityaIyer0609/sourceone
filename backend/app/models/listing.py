@@ -28,12 +28,22 @@ class SupplierListing(UUIDPrimaryKey, Timestamps, Base):
         CheckConstraint(_in("currency", SUPPORTED_CURRENCIES), name="currency"),
         CheckConstraint(_in("uom", SUPPORTED_UNITS), name="uom"),
         CheckConstraint(_in("availability", AVAILABILITY), name="availability"),
+        CheckConstraint("maximum_quantity IS NULL OR maximum_quantity > 0", name="maximum_quantity_positive"),
+        CheckConstraint(
+            "maximum_quantity IS NULL OR maximum_quantity >= minimum_quantity",
+            name="maximum_covers_minimum",
+        ),
+        CheckConstraint(
+            "(availability = 'limited') = (maximum_quantity IS NOT NULL)",
+            name="limited_has_maximum",
+        ),
     )
 
     supplier_user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), index=True)
     product_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("products.id"), index=True)
     uom: Mapped[str] = mapped_column(String(16))
     minimum_quantity: Mapped[Decimal] = mapped_column(Numeric(18, 3))
+    maximum_quantity: Mapped[Decimal | None] = mapped_column(Numeric(18, 3))
     asking_price: Mapped[Decimal] = mapped_column(Numeric(18, 4))
     currency: Mapped[str] = mapped_column(String(3))
     is_active: Mapped[bool] = mapped_column(default=True, server_default=true())

@@ -17,6 +17,7 @@ import { UsersWorkspace } from "./UsersWorkspace";
 import { ApprovalsWorkspace } from "./ApprovalsWorkspace";
 import { CompanyWorkspace } from "./CompanyWorkspace";
 import { ListingsWorkspace } from "./ListingsWorkspace";
+import { SupplierFreightWorkspace } from "./SupplierFreightWorkspace";
 import { SupplierHome } from "./SupplierHome";
 
 const screenRoles: Record<OperationsScreen, readonly string[]> = {
@@ -28,6 +29,7 @@ const screenRoles: Record<OperationsScreen, readonly string[]> = {
   Dashboard: ["buyer"],
   "Supplier Home": ["supplier"],
   Listings: ["supplier"],
+  "Your freight": ["supplier"],
   "Item Master": ["platform_admin", "pricing_admin"],
   "Rate Management": ["platform_admin", "pricing_admin"],
   "Freight Management": ["platform_admin", "pricing_admin"],
@@ -49,6 +51,7 @@ export function OperationsPage({ screen }: { screen: OperationsScreen }) {
   const dashboard = screen === "Dashboard";
   const supplierHome = screen === "Supplier Home";
   const listings = screen === "Listings";
+  const ownFreight = screen === "Your freight";
   const items = screen === "Item Master";
   const requests = screen === "Purchase Requests";
   const users = screen === "User Management";
@@ -57,7 +60,7 @@ export function OperationsPage({ screen }: { screen: OperationsScreen }) {
   return (
     <div className="page">
       <div className="page-heading"><div><small>{config.kicker}</small><Heading level={1}>{config.title}</Heading><p>{config.description}</p></div></div>
-      {freight ? <FreightWorkbench /> : freightAdmin ? <FreightManagement /> : tracking ? <TrackingView /> : rates ? <RateManagementWorkspace /> : orders ? <OrdersWorkspace /> : reorder ? <ReorderWorkspace /> : dashboard ? <DashboardWorkspace /> : supplierHome ? <SupplierHome /> : listings ? <ListingsWorkspace /> : items ? <ItemMasterWorkspace /> : requests ? <PurchaseRequestsWorkspace /> : users ? <UsersWorkspace /> : approvals ? <ApprovalsWorkspace /> : company ? <CompanyWorkspace /> : null}
+      {freight ? <FreightWorkbench /> : freightAdmin ? <FreightManagement /> : tracking ? <TrackingView /> : rates ? <RateManagementWorkspace /> : orders ? <OrdersWorkspace /> : reorder ? <ReorderWorkspace /> : dashboard ? <DashboardWorkspace /> : supplierHome ? <SupplierHome /> : listings ? <ListingsWorkspace /> : ownFreight ? <SupplierFreightWorkspace /> : items ? <ItemMasterWorkspace /> : requests ? <PurchaseRequestsWorkspace /> : users ? <UsersWorkspace /> : approvals ? <ApprovalsWorkspace /> : company ? <CompanyWorkspace /> : null}
     </div>
   );
 }

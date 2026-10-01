@@ -11,9 +11,10 @@ import { listRateSeries } from "../../lib/api/pricing";
 import { useApiQuery } from "../../lib/api/useApiQuery";
 import { listAdminDocuments, setProductDocumentActive, uploadProductDocument } from "../../lib/api/productContent";
 import { titleCase } from "../../lib/pricingFormat";
+import { SubmissionQueue } from "./ProductSubmissions";
 
 const SPEC_FIELDS = [
-  ["grade", "Grade"], ["producer", "Producer"], ["mfi", "MFI"],
+  ["grade", "Grade"], ["mfi", "MFI"],
   ["density", "Density"], ["application", "Application"], ["quality", "Quality"],
 ] as const;
 const EMPTY_SPECS = Object.fromEntries(SPEC_FIELDS.map(([key]) => [key, ""]));
@@ -88,7 +89,7 @@ export function ItemMasterWorkspace() {
     setBusy(true);
     setError(null);
     const specifications = {
-      ...Object.fromEntries((selected?.specifications ?? []).filter((field) => field.value && !SPEC_FIELDS.some(([key]) => key === field.key) && field.key !== "uom" && field.key !== "description").map((field) => [field.key, field.value])),
+      ...Object.fromEntries((selected?.specifications ?? []).filter((field) => field.value && field.key !== "producer" && !SPEC_FIELDS.some(([key]) => key === field.key) && field.key !== "uom" && field.key !== "description").map((field) => [field.key, field.value])),
       ...draft.specifications,
     };
     const edit: ProductEdit = {
@@ -113,7 +114,7 @@ export function ItemMasterWorkspace() {
     setDraft({
       productCode: row.productCode, name: row.name, category: row.category,
       subcategory: row.subcategory ?? "", description: row.description ?? "", uom: row.uom, isActive: row.isActive,
-      specifications: { ...EMPTY_SPECS, ...Object.fromEntries(row.specifications.flatMap((field) => field.value ? [[field.key, field.value]] : [])) },
+      specifications: { ...EMPTY_SPECS, ...Object.fromEntries(row.specifications.flatMap((field) => field.value && field.key !== "producer" ? [[field.key, field.value]] : [])) },
     });
     setSeriesCode("");
     setError(null);
@@ -154,6 +155,7 @@ export function ItemMasterWorkspace() {
 
   return (
     <>
+      <SubmissionQueue />
       <div className="metric-row">
         {[
           ["ACTIVE", rows.filter((row) => row.isActive).length, "Sellable products"],

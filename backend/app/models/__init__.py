@@ -8,9 +8,18 @@ from app.models.catalogue import (
     ProducerGradeAlias,
     Product,
     ProductRateSeries,
+    ProductSubmission,
 )
 from app.models.erp import ErpCustomer, ErpGrade, ErpPriceRowImport, ErpSyncRun
-from app.models.freight import FreightDefault, FreightDistanceRate, FreightRule, PinCoordinate, RoadDistance
+from app.models.freight import (
+    FreightDefault,
+    FreightDistanceRate,
+    FreightRule,
+    PinCoordinate,
+    RoadDistance,
+    SupplierFreightKmRate,
+    SupplierFreightLane,
+)
 from app.models.fulfilment import OrderDocument, RequirementResponse
 from app.models.identity import Organisation, Permission, Role, RolePermission, User, UserRole
 from app.models.listing import AskingPriceAverage, SupplierListing
@@ -58,6 +67,7 @@ __all__ = [
     "ProductDocument",
     "ProductQuestion",
     "ProductRateSeries",
+    "ProductSubmission",
     "PurchaseRequest",
     "PurchaseRequestSupplier",
     "RateSeries",

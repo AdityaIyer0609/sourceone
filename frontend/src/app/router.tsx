@@ -8,6 +8,7 @@ import { NegotiationsPage } from '../pages/NegotiationsPage'
 import { NotFoundPage } from '../pages/NotFoundPage'
 import { OperationsPage } from '../pages/operations/OperationsPage'
 import { ProductDetailPage } from '../pages/ProductDetailPage'
+import { ProfilePage } from '../pages/ProfilePage'
 import { SupplierProfilePage } from '../pages/SupplierProfilePage'
 import type { RouteHandle } from './paths'
 
@@ -37,12 +38,14 @@ export const router = createBrowserRouter([
           { path: 'dashboard', element: <OperationsPage screen="Dashboard" />, handle: title('Dashboard') },
           { path: 'supplier', element: <OperationsPage screen="Supplier Home" />, handle: title('Supplier') },
           { path: 'listings', element: <OperationsPage screen="Listings" />, handle: title('Listings') },
+          { path: 'freight', element: <OperationsPage screen="Your freight" />, handle: title('Your freight') },
           { path: 'admin/item-master', element: <OperationsPage screen="Item Master" />, handle: title('Item Master') },
           { path: 'admin/rate-management', element: <OperationsPage screen="Rate Management" />, handle: title('Rate Management') },
           { path: 'admin/freight', element: <OperationsPage screen="Freight Management" />, handle: title('Freight') },
           { path: 'admin/users', element: <OperationsPage screen="User Management" />, handle: title('User Management') },
           { path: 'approvals', element: <OperationsPage screen="Approvals" />, handle: title('Approvals') },
           { path: 'company', element: <OperationsPage screen="Company" />, handle: title('Company') },
+          { path: 'profile', element: <ProfilePage />, handle: title('Profile') },
           { path: '*', element: <NotFoundPage />, handle: title('Not Found') },
         ],
       },

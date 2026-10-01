@@ -27,6 +27,7 @@ export interface RequestSupplier {
   } | null
   quote: QuotePosition
   requirementResponses: { key: string; status: 'met' | 'not_met'; comment: string | null }[]
+  supplyNote: string | null
 }
 
 export interface PurchaseRequest {

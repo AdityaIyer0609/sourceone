@@ -7,6 +7,7 @@ export type OperationsScreen =
   | 'Dashboard'
   | 'Supplier Home'
   | 'Listings'
+  | 'Your freight'
   | 'Item Master'
   | 'Rate Management'
   | 'Freight Management'
@@ -28,7 +29,8 @@ export const operationsConfigs: Record<OperationsScreen, OperationsConfig> = {
   Reorder: { kicker: 'PURCHASE HISTORY', title: 'Reorder centre', description: "Repeat proven purchases with today's rate and terms." },
   Dashboard: { kicker: 'CUSTOMER INTELLIGENCE', title: 'Procurement dashboard', description: 'Spend, savings and supply performance across your organization.' },
   'Supplier Home': { kicker: 'SUPPLIER', title: 'Your work', description: 'Requests, negotiations, and orders that are waiting on you, plus your own listings and performance.' },
-  Listings: { kicker: 'SUPPLIER', title: 'Listings', description: 'Your asking prices. Saving a price updates the listing. It does not publish a benchmark.' },
+  Listings: { kicker: 'SUPPLIER', title: 'Listings', description: 'Your asking prices, catalogue products you can list at your own price, and new products submitted for a pricing admin to accept. Saving a price updates a listing. It does not publish a benchmark.' },
+  'Your freight': { kicker: 'SUPPLIER', title: 'Your freight', description: 'Saved lanes are used when a buyer’s PIN matches. A rate per km is used only when it does not. Neither one changes your asking price or an order total.' },
   'Item Master': { kicker: 'ADMINISTRATION', title: 'Item master', description: 'Govern normalized specifications, SKUs and procurement controls.' },
   'Rate Management': { kicker: 'COMMERCIAL ADMIN', title: 'Rate management', description: 'Publish benchmarks, review submissions and maintain rate integrity.' },
   'Freight Management': { kicker: 'COMMERCIAL ADMIN', title: 'Freight rules', description: 'Plenza freight lanes used only to estimate landed cost.' },

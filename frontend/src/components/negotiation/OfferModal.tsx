@@ -18,6 +18,8 @@ export function OfferModal({
   suppliers,
   productCode,
   initialPin = "",
+  requestedDelivery = null,
+  initialDeliveryDate = "",
   onClose,
   onSubmit,
 }: {
@@ -31,6 +33,8 @@ export function OfferModal({
   suppliers?: NegotiationSupplier[];
   productCode?: string;
   initialPin?: string;
+  requestedDelivery?: string | null;
+  initialDeliveryDate?: string;
   onClose: () => void;
   onSubmit: (input: OfferInput & { quantity: string; supplierUserId?: string; destinationPin?: string; freightBasis?: FreightBasis }) => Promise<void>;
 }) {
@@ -44,6 +48,7 @@ export function OfferModal({
     if (asking) setPrice(asking);
   };
   const [pin, setPin] = useState(initialPin);
+  const [deliveryDate, setDeliveryDate] = useState(initialDeliveryDate);
   const [basis, setBasis] = useState<FreightBasis>("standard");
   const [estimate, setEstimate] = useState<FreightEstimate | null>(null);
   const [estimating, setEstimating] = useState(false);
@@ -51,7 +56,8 @@ export function OfferModal({
   const [error, setError] = useState<unknown>(null);
   const needsFreight = Boolean(suppliers);
   const pinOk = /^[1-9][0-9]{5}$/.test(pin);
-  const valid = Number(quantity) > 0 && Number(price) > 0 && (!suppliers || Boolean(supplierId)) && (!needsFreight || pinOk);
+  const askDelivery = Boolean(requestedDelivery);
+  const valid = Number(quantity) > 0 && Number(price) > 0 && (!suppliers || Boolean(supplierId)) && (!needsFreight || pinOk) && (!askDelivery || Boolean(deliveryDate));
   useEffect(() => {
     if (!needsFreight || !pinOk || !productCode || !supplierId || !(Number(quantity) > 0)) {
       setEstimate(null);
@@ -82,6 +88,7 @@ export function OfferModal({
         supplierUserId: suppliers ? supplierId : undefined,
         destinationPin: needsFreight ? pin : undefined,
         freightBasis: needsFreight ? basis : undefined,
+        deliveryDate: askDelivery ? deliveryDate : undefined,
       });
     } catch (caught) {
       setError(caught);
@@ -113,6 +120,12 @@ export function OfferModal({
           <div className="order-freight"><small>Estimated freight{shown?.label ? ` · ${shown.label}` : ""}</small><strong>{freightText}</strong></div>
           <p className="order-note">Freight is for this supplier and this delivery PIN. It is not part of the offered price or the benchmark.</p>
         </div>
+      )}
+      {askDelivery && requestedDelivery && (
+        <label>Your delivery date
+          <Input type="date" aria-label="Your delivery date" value={deliveryDate} onChange={(event) => setDeliveryDate(event.target.value)} />
+          <small className="request-note">The buyer asked for {requestedDelivery}. That date stays fixed. This is the date you can deliver.</small>
+        </label>
       )}
       <Input value={message} placeholder="Message to the other party (optional)" onChange={(event) => setMessage(event.target.value)} aria-label="Message" />
       {error ? <p className="negative" role="alert">{getErrorMessage(error)}{error instanceof ApiError && error.code ? ` (${error.code})` : ""}</p> : null}

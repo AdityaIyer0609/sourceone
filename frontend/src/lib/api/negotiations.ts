@@ -25,6 +25,7 @@ export interface NegotiationVersion {
   quantity: string
   uom: string
   message: string | null
+  deliveryDate: string | null
   createdAt: string
 }
 
@@ -60,12 +61,15 @@ export interface Negotiation {
   paymentTerms: string | null
   requirements: { key: string; label: string; value: string }[]
   requirementResponses: { key: string; status: 'met' | 'not_met'; comment: string | null }[]
+  supplyNote: string | null
+  deliveryNote: string | null
 }
 
 export interface OfferInput {
   offeredPrice: string
   quantity?: string
   message?: string
+  deliveryDate?: string
 }
 
 export interface NegotiationSupplier {

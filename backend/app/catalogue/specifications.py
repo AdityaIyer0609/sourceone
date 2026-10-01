@@ -6,21 +6,36 @@ from app.core.errors import ValidationFailed
 from app.models.catalogue import Product
 
 # Shown on every product, in this order. A missing value is not specified.
+# Producer is not a material specification. Two suppliers of the same grade can list one product.
 CORE_FIELDS = (
     ("grade", "Grade"),
-    ("producer", "Producer"),
     ("mfi", "MFI"),
     ("density", "Density"),
     ("application", "Application"),
     ("quality", "Quality"),
 )
+HIDDEN_SPECIFICATIONS = frozenset({"producer"})
 KEY = re.compile(r"^[a-z][a-z0-9_]{0,31}$")
+
+
+def require_core_specifications(raw: dict | None) -> dict[str, str]:
+    """Grade, MFI, density, application, and quality must all be present."""
+    cleaned = clean_specifications(raw)
+    missing = [label for key, label in CORE_FIELDS if key not in cleaned]
+    if missing:
+        raise ValidationFailed(
+            "Grade, MFI, density, application, and quality are required",
+            details={"fields": missing},
+        )
+    return cleaned
 
 
 def clean_specifications(raw: dict | None) -> dict[str, str]:
     cleaned: dict[str, str] = {}
     for key, value in (raw or {}).items():
         code = str(key).strip().lower()
+        if code in HIDDEN_SPECIFICATIONS:
+            continue
         if KEY.fullmatch(code) is None:
             raise ValidationFailed("Specification names must be short lowercase words", details={"field": key})
         text = "" if value is None else str(value).strip()
@@ -46,7 +61,9 @@ def specification_rows(product: Product) -> list[dict]:
     rows.append({"key": "uom", "label": "UOM", "value": product.uom})
     description = (product.description or "").strip()
     rows.append({"key": "description", "label": "Description", "value": description or None})
+    known = {item[0] for item in CORE_FIELDS} | HIDDEN_SPECIFICATIONS
     for key in sorted(stored):
-        if key not in {item[0] for item in CORE_FIELDS}:
-            rows.append({"key": key, "label": key.replace("_", " ").title(), "value": stored[key]})
+        if key in known:
+            continue
+        rows.append({"key": key, "label": key.replace("_", " ").title(), "value": stored[key]})
     return rows

@@ -5,12 +5,15 @@ from decimal import Decimal
 from typing import Annotated
 
 from fastapi import APIRouter, Depends
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.deps import DbSession, require_any
 from app.api.v1.pricing_presenters import money, quote_position
 from app.catalogue import market_average
+from app.catalogue.listings import supply_note
 from app.identity.service import Actor
+from app.models.listing import SupplierListing
 from app.models.negotiation import Negotiation, NegotiationVersion
 from app.negotiation import service
 from app.negotiation.constants import NegotiationPermission, NegotiationStatus
@@ -40,8 +43,19 @@ def _version(negotiation: Negotiation, version: NegotiationVersion) -> schemas.V
         quantity=quantity_text(version.quantity),
         uom=version.uom,
         message=version.message,
+        delivery_date=version.delivery_date,
         created_at=version.created_at,
     )
+
+
+def _supply_note(db: Session, negotiation: Negotiation) -> str | None:
+    listing = db.scalar(select(SupplierListing).where(
+        SupplierListing.supplier_user_id == negotiation.supplier_user_id,
+        SupplierListing.product_id == negotiation.product_id,
+    ))
+    if listing is None:
+        return None
+    return supply_note(listing, negotiation.quantity)
 
 
 def _present(actor: Actor, db: Session, negotiation: Negotiation) -> schemas.NegotiationOut:
@@ -101,6 +115,8 @@ def _present(actor: Actor, db: Session, negotiation: Negotiation) -> schemas.Neg
             schemas.RequirementResponseOut(key=row.requirement_key, status=row.status, comment=row.comment)
             for row in service.requirement_answers(db, negotiation.id)
         ],
+        supply_note=_supply_note(db, negotiation),
+        delivery_note=service.delivery_note(negotiation),
     )
 
 
@@ -138,7 +154,7 @@ def get_negotiation(negotiation_id: uuid.UUID, db: DbSession, actor: Participant
 def make_offer(negotiation_id: uuid.UUID, body: schemas.OfferIn, db: DbSession, actor: Participant):
     negotiation = service.make_offer(
         db, actor, negotiation_id, price=body.offered_price, quantity=body.quantity, message=body.message,
-        currency=body.currency, uom=body.uom,
+        currency=body.currency, uom=body.uom, delivery_date=body.delivery_date,
     )
     db.commit()
     return _present(actor, db, negotiation)

@@ -41,6 +41,7 @@ def _out(listing: SupplierListing) -> ListingOut:
         origin_label=listing.supplier.organisation.dispatch_label,
         uom=listing.uom,
         minimum_quantity=f"{listing.minimum_quantity.normalize():f}",
+        maximum_quantity=f"{listing.maximum_quantity.normalize():f}" if listing.maximum_quantity is not None else None,
         asking_price=money(listing.asking_price, listing.currency),
         availability=listing.availability,
         is_active=listing.is_active,
@@ -66,7 +67,7 @@ def create_listing(body: ListingIn, db: DbSession, actor: Supplier):
     listing = service.create_listing(
         db, actor, product_code=body.product_code, minimum_quantity=body.minimum_quantity,
         asking_price=body.asking_price, currency=body.currency, availability=body.availability,
-        is_active=body.is_active,
+        is_active=body.is_active, maximum_quantity=body.maximum_quantity,
     )
     db.commit()
     return _out(_loaded(db, listing.id))
@@ -82,6 +83,7 @@ def update_listing(listing_id: uuid.UUID, body: ListingActiveIn, db: DbSession, 
     listing = service.update_listing(
         db, actor, listing_id, is_active=body.is_active, asking_price=body.asking_price,
         minimum_quantity=body.minimum_quantity, availability=body.availability,
+        maximum_quantity=body.maximum_quantity, maximum_set="maximum_quantity" in body.model_fields_set,
     )
     db.commit()
     return _out(_loaded(db, listing.id))

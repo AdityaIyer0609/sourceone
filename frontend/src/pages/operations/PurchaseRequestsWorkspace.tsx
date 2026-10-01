@@ -1,5 +1,5 @@
 import { Search } from "lucide-react";
-import { Fragment, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { paths } from "../../app/paths";
 import { AsyncContent } from "../../components/feedback/AsyncContent";
@@ -26,10 +26,11 @@ function freightText(request: PurchaseRequest) {
   return "Freight on request";
 }
 
-function RequestModal({ productCode, quantity, pin, onClose, onCreated }: {
+function RequestModal({ productCode, quantity, pin, supplierId, onClose, onCreated }: {
   productCode: string;
   quantity: string;
   pin: string;
+  supplierId?: string;
   onClose: () => void;
   onCreated: () => void;
 }) {
@@ -42,6 +43,7 @@ function RequestModal({ productCode, quantity, pin, onClose, onCreated }: {
   const [paymentTerms, setPaymentTerms] = useState("");
   const [freightBasis, setFreightBasis] = useState<"standard" | "distance">("standard");
   const [supplierIds, setSupplierIds] = useState<string[]>([]);
+  const appliedSupplier = useRef(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const selected = (products.data ?? []).find((item) => item.productCode === code) ?? null;
@@ -51,6 +53,13 @@ function RequestModal({ productCode, quantity, pin, onClose, onCreated }: {
     code && selected && pinOk && quantityOk ? `rfq-matches:${code}:${amount}:${destination}` : null,
     (signal) => listSupplierMatches(code, { quantity: amount, uom: selected?.uom.code ?? "KG", destinationPin: destination }, signal),
   );
+  useEffect(() => {
+    if (appliedSupplier.current || !supplierId || !matches.data) return;
+    if (matches.data.matches.some((match) => match.supplierUserId === supplierId)) {
+      setSupplierIds([supplierId]);
+      appliedSupplier.current = true;
+    }
+  }, [supplierId, matches.data]);
   const chosen = (matches.data?.matches ?? []).filter((item) => supplierIds.includes(item.supplierUserId));
   const toggleSupplier = (id: string) => setSupplierIds((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id]);
   const submit = async () => {
@@ -217,7 +226,7 @@ export function PurchaseRequestsWorkspace() {
                       <table className="market-table"><thead><tr><th>Supplier</th><th>Asking price</th><th>Latest offer</th><th>Material</th><th>Freight</th><th>GST</th><th>Payable estimate</th><th>Status</th><th/></tr></thead><tbody>
                         {request.suppliers.map((row) => (
                           <tr key={row.supplierUserId}>
-                            <td><strong><OrgLink organisationId={row.organisationId}>{row.organisation}</OrgLink></strong><small>{row.supplierName}</small></td>
+                            <td><strong><OrgLink organisationId={row.organisationId}>{row.organisation}</OrgLink></strong><small>{row.supplierName}</small>{row.supplyNote ? <small>{row.supplyNote}</small> : null}</td>
                             <td>{row.askingPrice ? formatMoney(row.askingPrice) : "—"}</td>
                             <td>{row.latestOffer ? formatMoney(row.latestOffer) : "—"}{row.quote.versusAverage && <small>{formatSignedMoney(row.quote.versusAverage)} vs market avg</small>}</td>
                             <td>{row.materialValue ? formatMoney(row.materialValue, 2) : "—"}</td>
@@ -246,6 +255,7 @@ export function PurchaseRequestsWorkspace() {
           productCode={searchParams.get("product") ?? ""}
           quantity={searchParams.get("quantity") ?? ""}
           pin={searchParams.get("pin") ?? ""}
+          supplierId={searchParams.get("supplier") ?? undefined}
           onClose={() => setCreating(false)}
           onCreated={reload}
         />

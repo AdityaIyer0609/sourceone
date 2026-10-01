@@ -38,7 +38,7 @@ def test_match_explains_listing_quantity_and_freight_without_a_score(client, wor
     other = _other_supplier(world)
     cheap = client.post("/api/v1/listings", json={
         "productCode": product.product_code, "minimumQuantity": "500", "askingPrice": "90.0000",
-        "currency": "INR", "availability": "limited",
+        "currency": "INR", "availability": "limited", "maximumQuantity": "2000",
     }, headers=as_actor(other))
     assert cheap.status_code == 201, cheap.text
     idle = User(email=f"idle-{world.suffix.lower()}@test.local", full_name="No Listing", organisation_id=other.organisation_id)

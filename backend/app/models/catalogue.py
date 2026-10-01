@@ -1,11 +1,14 @@
 import uuid
+from datetime import datetime
+from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import CheckConstraint, ForeignKey, Integer, String, Text, UniqueConstraint, true
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, Integer, Numeric, String, Text, UniqueConstraint, text, true
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, Timestamps, UUIDPrimaryKey
+from app.models.identity import User
 
 if TYPE_CHECKING:
     from app.models.pricing import RateSeries
@@ -114,3 +117,61 @@ class ProductRateSeries(UUIDPrimaryKey, Timestamps, Base):
 
     product: Mapped[Product] = relationship(back_populates="series_links")
     rate_series: Mapped["RateSeries"] = relationship()
+
+
+class ProductSubmission(UUIDPrimaryKey, Timestamps, Base):
+    """A supplier's request for a new catalogue product. It is not sellable until a pricing admin accepts it."""
+
+    __tablename__ = "product_submissions"
+    __table_args__ = (
+        CheckConstraint("status IN ('pending', 'accepted', 'rejected')", name="status"),
+        CheckConstraint(
+            "(status = 'pending') = (reviewed_at IS NULL AND reviewed_by_user_id IS NULL AND product_id IS NULL)",
+            name="pending_unreviewed",
+        ),
+        CheckConstraint("(status = 'accepted') = (product_id IS NOT NULL)", name="accepted_has_product"),
+        CheckConstraint("uom = 'KG'", name="uom"),
+        CheckConstraint("asking_price > 0", name="asking_price_positive"),
+        CheckConstraint("minimum_quantity > 0", name="minimum_quantity_positive"),
+        CheckConstraint("currency IN ('INR', 'USD')", name="currency"),
+        CheckConstraint("availability IN ('in_stock', 'limited', 'on_request')", name="availability"),
+        CheckConstraint("maximum_quantity IS NULL OR maximum_quantity > 0", name="maximum_quantity_positive"),
+        CheckConstraint(
+            "maximum_quantity IS NULL OR maximum_quantity >= minimum_quantity",
+            name="maximum_covers_minimum",
+        ),
+        CheckConstraint(
+            "(availability = 'limited') = (maximum_quantity IS NOT NULL)",
+            name="limited_has_maximum",
+        ),
+        Index(
+            "uq_product_submissions_pending_code",
+            "supplier_user_id",
+            "proposed_code",
+            unique=True,
+            postgresql_where=text("status = 'pending'"),
+        ),
+    )
+
+    supplier_user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), index=True)
+    proposed_code: Mapped[str] = mapped_column(String(64))
+    name: Mapped[str] = mapped_column(String(255))
+    category: Mapped[str] = mapped_column(String(64))
+    subcategory: Mapped[str | None] = mapped_column(String(64))
+    description: Mapped[str | None] = mapped_column(Text)
+    uom: Mapped[str] = mapped_column(String(16))
+    specifications: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    asking_price: Mapped[Decimal] = mapped_column(Numeric(18, 4))
+    currency: Mapped[str] = mapped_column(String(3))
+    minimum_quantity: Mapped[Decimal] = mapped_column(Numeric(18, 3))
+    maximum_quantity: Mapped[Decimal | None] = mapped_column(Numeric(18, 3))
+    availability: Mapped[str] = mapped_column(String(16))
+    status: Mapped[str] = mapped_column(String(16), default="pending", server_default="pending")
+    review_note: Mapped[str | None] = mapped_column(Text)
+    reviewed_by_user_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"))
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    product_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("products.id"))
+
+    supplier: Mapped[User] = relationship(foreign_keys=[supplier_user_id])
+    reviewed_by: Mapped[User | None] = relationship(foreign_keys=[reviewed_by_user_id])
+    product: Mapped[Product | None] = relationship()

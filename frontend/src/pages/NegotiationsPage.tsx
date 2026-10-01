@@ -46,11 +46,13 @@ function needsReply(status: NegotiationStatus) {
 
 function listSummary(item: Negotiation) {
   const latest = item.versions.at(-1);
-  const price = latest ? `${formatMoney(latest.offeredPrice)} / ${item.uom.toLowerCase()}` : "No offer yet";
-  if (!needsReply(item.status) || !item.awaiting) return price;
-  if (item.awaiting === item.viewerRole) return `${price} · Your turn`;
-  const waiting = item.awaiting === "buyer" ? item.buyer.organisation : item.supplier.organisation;
-  return `${price} · Waiting for ${waiting}`;
+  const parts = [latest ? `${formatMoney(latest.offeredPrice)} / ${item.uom.toLowerCase()}` : "No offer yet"];
+  if (item.deliveryNote) parts.push(item.deliveryNote);
+  if (needsReply(item.status) && item.awaiting) {
+    if (item.awaiting === item.viewerRole) parts.push("Your turn");
+    else parts.push(`Waiting for ${item.awaiting === "buyer" ? item.buyer.organisation : item.supplier.organisation}`);
+  }
+  return parts.join(" · ");
 }
 
 function NegotiationRoom({ negotiation, order, onChanged, onOrdersChanged }: { negotiation: Negotiation; order: Order | null; onChanged: () => void; onOrdersChanged: () => void }) {
@@ -90,7 +92,7 @@ function NegotiationRoom({ negotiation, order, onChanged, onOrdersChanged }: { n
 
   return (
     <>
-      <div className="page-heading"><div><small>NEGOTIATION ROOM · {negotiation.negotiationNumber}</small><Heading level={1}>{negotiation.product.name} · {quantityText(negotiation.quantity, negotiation.uom)}</Heading><p>{negotiation.buyer.organisation} ↔ {negotiation.viewerRole === "buyer" ? <OrgLink organisationId={negotiation.supplier.organisationId}>{negotiation.supplier.organisation}</OrgLink> : negotiation.supplier.organisation}{negotiation.requiredBy ? ` · Required by ${negotiation.requiredBy}` : ""}{negotiation.paymentTerms ? ` · ${negotiation.paymentTerms}` : ""}</p></div><Badge tone={STATUS_TONES[negotiation.status]}><Clock3 size={14} /> {statusLine}</Badge></div>
+      <div className="page-heading"><div><small>NEGOTIATION ROOM · {negotiation.negotiationNumber}</small><Heading level={1}>{negotiation.product.name} · {quantityText(negotiation.quantity, negotiation.uom)}</Heading><p>{negotiation.buyer.organisation} ↔ {negotiation.viewerRole === "buyer" ? <OrgLink organisationId={negotiation.supplier.organisationId}>{negotiation.supplier.organisation}</OrgLink> : negotiation.supplier.organisation}{negotiation.requiredBy ? ` · Required by ${negotiation.requiredBy}` : ""}{negotiation.paymentTerms ? ` · ${negotiation.paymentTerms}` : ""}</p>{negotiation.supplyNote ? <p className="request-note">{negotiation.supplyNote}</p> : null}{negotiation.deliveryNote ? <p className="request-note">{negotiation.deliveryNote}</p> : null}</div><Badge tone={STATUS_TONES[negotiation.status]}><Clock3 size={14} /> {statusLine}</Badge></div>
       <div className="negotiation-layout">
         <section className="offer-main">
           {shown ? (
@@ -104,6 +106,7 @@ function NegotiationRoom({ negotiation, order, onChanged, onOrdersChanged }: { n
                 ["Negotiated price", negotiated ? `${formatMoney(negotiated.price)} / ${unit}` : "Not agreed yet"],
                 ["Benchmark as of", benchmark.asOfDate ? `${formatDate(benchmark.asOfDate)}${benchmark.state === "stale" ? " · Stale" : ""}` : "—"],
                 ["Offered", formatDateTime(shown.createdAt)],
+                ...(shown.deliveryDate ? [["Supplier delivery date", formatDate(shown.deliveryDate)] as [string, string]] : []),
               ].map(([label, value], index) => <div className={index === 3 ? "emphasis" : ""} key={label}><small>{label}</small><strong>{value}</strong></div>)}</div>
               <div className="offer-message"><MessageSquareText size={18} /><p>{shown.message ? `“${shown.message}”` : "No message with this offer."}</p></div>
               {negotiation.requirements.length > 0 && <RequirementList rows={negotiation.requirements} />}
@@ -135,7 +138,7 @@ function NegotiationRoom({ negotiation, order, onChanged, onOrdersChanged }: { n
         </section>
         <aside className="version-panel">
           <div className="section-title"><div><small>AUDIT TRAIL</small><Heading level={2}>Offer versions</Heading></div><History size={18} /></div>
-          <div className="version-list">{[...negotiation.versions].reverse().map((offer) => <Button variant="ghost" className={`version-item ${shown?.versionNumber === offer.versionNumber ? "is-active" : ""}`} key={offer.versionNumber} onClick={() => setVersion(offer.versionNumber)}><span className="version-node">V{offer.versionNumber}</span><span><strong>{offerLabel(offer.offeredBy)}{offer === latest ? " · Current" : ""}</strong><small>{formatDateTime(offer.createdAt)}</small><b>{formatMoney(offer.offeredPrice)}/{unit}</b><small>{quantityText(offer.quantity, offer.uom)} · {offer.author}</small></span></Button>)}</div>
+          <div className="version-list">{[...negotiation.versions].reverse().map((offer) => <Button variant="ghost" className={`version-item ${shown?.versionNumber === offer.versionNumber ? "is-active" : ""}`} key={offer.versionNumber} onClick={() => setVersion(offer.versionNumber)}><span className="version-node">V{offer.versionNumber}</span><span><strong>{offerLabel(offer.offeredBy)}{offer === latest ? " · Current" : ""}</strong><small>{formatDateTime(offer.createdAt)}</small><b>{formatMoney(offer.offeredPrice)}/{unit}</b><small>{quantityText(offer.quantity, offer.uom)} · {offer.author}{offer.deliveryDate ? ` · Delivers ${formatDate(offer.deliveryDate)}` : ""}</small></span></Button>)}</div>
           {negotiated ? (
             <div className="saving-callout"><span>Negotiated price</span><strong>{formatMoney(negotiated.price)}/{unit}</strong><small>Accepted offer V{negotiated.versionNumber} · {quantityText(negotiated.quantity, negotiated.uom)}</small></div>
           ) : (
@@ -153,6 +156,8 @@ function NegotiationRoom({ negotiation, order, onChanged, onOrdersChanged }: { n
           currency={negotiation.currency}
           uom={negotiation.uom}
           initialQuantity={latest?.quantity ?? negotiation.quantity}
+          requestedDelivery={negotiation.viewerRole === "supplier" ? negotiation.requiredBy : null}
+          initialDeliveryDate={[...negotiation.versions].reverse().find((offer) => offer.deliveryDate)?.deliveryDate ?? ""}
           submitLabel={latest ? "Send counter offer" : "Submit offer"}
           onClose={() => setCounterOpen(false)}
           onSubmit={async (input) => {

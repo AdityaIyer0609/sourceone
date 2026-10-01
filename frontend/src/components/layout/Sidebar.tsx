@@ -1,8 +1,8 @@
-import { Settings2, X } from "lucide-react";
+import { X } from "lucide-react";
 import { NavLink } from "react-router-dom";
-import { commerceNav, controlCentreNav, visibleNav, type NavItem } from "../../app/navigation";
+import { accountNav, commerceNav, controlCentreNav, visibleNav, type NavItem } from "../../app/navigation";
 import { paths } from "../../app/paths";
-import { clearSession, readSession } from "../../lib/api/auth";
+import { readSession } from "../../lib/api/auth";
 import { listNegotiations } from "../../lib/api/negotiations";
 import { useApiQuery } from "../../lib/api/useApiQuery";
 import { Button } from "../ui";
@@ -31,6 +31,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
   const role = roles[0]?.replace(/_/g, " ") ?? "Account";
   const commerce = visibleNav(commerceNav, roles);
   const control = visibleNav(controlCentreNav, roles);
+  const account = visibleNav(accountNav, roles);
   const negotiations = useApiQuery(commerce.some((item) => item.to === paths.negotiations) ? "nav-negotiations" : null, (signal) => listNegotiations(signal));
   const openNegotiations = (negotiations.data ?? []).filter((item) => OPEN_NEGOTIATION.has(item.status)).length;
   const nav = commerce.map((item) => item.to === paths.negotiations && openNegotiations > 0 ? { ...item, badge: openNegotiations } : item);
@@ -49,11 +50,12 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
         {nav.map((item) => <SidebarLink key={item.to} item={item} onNavigate={onClose} />)}
         {control.length > 0 && <small className="nav-kicker nav-kicker--spaced">CONTROL CENTRE</small>}
         {control.map((item) => <SidebarLink key={item.to} item={item} onNavigate={onClose} />)}
+        {account.length > 0 && <small className="nav-kicker nav-kicker--spaced">ACCOUNT</small>}
+        {account.map((item) => <SidebarLink key={item.to} item={item} onNavigate={onClose} />)}
       </nav>
       <div className="user-strip">
         <div className="avatar">{initials(name)}</div>
         <div><strong>{name}</strong><small>{session?.user.email}</small></div>
-        <Button variant="ghost" className="icon-button" aria-label="Sign out" onClick={() => clearSession()}><Settings2 size={17} /></Button>
       </div>
     </aside>
   );

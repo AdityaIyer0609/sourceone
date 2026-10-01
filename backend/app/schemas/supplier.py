@@ -54,6 +54,7 @@ class SupplierProductOut(ApiModel):
     name: str
     uom: str
     minimum_quantity: str
+    maximum_quantity: str | None = None
     asking_price: Money
     availability: Literal["in_stock", "limited", "on_request"]
 
@@ -76,6 +77,17 @@ class SupplierOrderOut(ApiModel):
     updated_at: datetime
 
 
+class SupplierComparisonOut(ApiModel):
+    basis: Literal["lane", "per_km"] | None
+    freight: Money | None
+    material: Money
+    landed: Money | None
+    factor: str | None
+    adjusted: Money | None
+    notes: list[str]
+    place: int | None
+
+
 class SupplierMatchOut(ApiModel):
     supplier_user_id: uuid.UUID
     supplier_name: str
@@ -83,6 +95,7 @@ class SupplierMatchOut(ApiModel):
     organisation_id: uuid.UUID
     asking_price: Money
     minimum_quantity: str
+    maximum_quantity: str | None = None
     uom: str
     availability: Literal["in_stock", "limited", "on_request"]
     origin_pin: str | None
@@ -97,6 +110,7 @@ class SupplierMatchOut(ApiModel):
     order_cancellation: CountRateOut
     on_time_delivery: CountRateOut
     quality: CountRateOut
+    comparison: SupplierComparisonOut
 
 
 class SupplierMatchListOut(ApiModel):

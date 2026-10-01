@@ -1,9 +1,13 @@
-"""SourceOne freight rules. These are estimates owned by SourceOne, never copied from ERP."""
+"""SourceOne freight rules. These are estimates owned by SourceOne, never copied from ERP.
 
+Supplier lanes and per-km rates are that supplier's own estimate. They are not platform rules and not ERP freight.
+"""
+
+import uuid
 from datetime import date
 from decimal import Decimal
 
-from sqlalchemy import CheckConstraint, Date, Numeric, String, UniqueConstraint, true
+from sqlalchemy import CheckConstraint, Date, ForeignKey, Numeric, String, UniqueConstraint, true
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, Timestamps, UUIDPrimaryKey
@@ -98,6 +102,47 @@ class FreightDistanceRate(UUIDPrimaryKey, Timestamps, Base):
     )
 
     currency: Mapped[str] = mapped_column(String(3), unique=True)
+    rate_per_km: Mapped[Decimal] = mapped_column(Numeric(18, 4))
+    minimum_freight: Mapped[Decimal | None] = mapped_column(Numeric(18, 4))
+    is_active: Mapped[bool] = mapped_column(default=True, server_default=true())
+
+
+class SupplierFreightLane(UUIDPrimaryKey, Timestamps, Base):
+    """A supplier's saved rate per kg from their dispatch PIN to one destination. Estimate only."""
+
+    __tablename__ = "supplier_freight_lanes"
+    __table_args__ = (
+        UniqueConstraint("organisation_id", "origin_pin", "destination_pin", "currency", name="uq_supplier_freight_lane"),
+        CheckConstraint("rate_per_kg > 0", name="rate_positive"),
+        CheckConstraint("minimum_freight IS NULL OR minimum_freight >= 0", name="minimum_freight_non_negative"),
+        CheckConstraint(_in("currency", SUPPORTED_CURRENCIES), name="currency"),
+        CheckConstraint("origin_pin ~ '^[1-9][0-9]{5}$'", name="origin_pin"),
+        CheckConstraint("destination_pin ~ '^[1-9][0-9]{5}$'", name="destination_pin"),
+    )
+
+    organisation_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("organisations.id"), index=True)
+    origin_pin: Mapped[str] = mapped_column(String(6))
+    destination_pin: Mapped[str] = mapped_column(String(6))
+    destination_label: Mapped[str] = mapped_column(String(64))
+    rate_per_kg: Mapped[Decimal] = mapped_column(Numeric(18, 4))
+    currency: Mapped[str] = mapped_column(String(3))
+    minimum_freight: Mapped[Decimal | None] = mapped_column(Numeric(18, 4))
+    is_active: Mapped[bool] = mapped_column(default=True, server_default=true())
+
+
+class SupplierFreightKmRate(UUIDPrimaryKey, Timestamps, Base):
+    """Used only when no saved lane matches this destination and a road distance exists."""
+
+    __tablename__ = "supplier_freight_km_rates"
+    __table_args__ = (
+        UniqueConstraint("organisation_id", "currency", name="uq_supplier_freight_km"),
+        CheckConstraint("rate_per_km > 0", name="rate_positive"),
+        CheckConstraint("minimum_freight IS NULL OR minimum_freight >= 0", name="minimum_freight_non_negative"),
+        CheckConstraint(_in("currency", SUPPORTED_CURRENCIES), name="currency"),
+    )
+
+    organisation_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("organisations.id"), index=True)
+    currency: Mapped[str] = mapped_column(String(3))
     rate_per_km: Mapped[Decimal] = mapped_column(Numeric(18, 4))
     minimum_freight: Mapped[Decimal | None] = mapped_column(Numeric(18, 4))
     is_active: Mapped[bool] = mapped_column(default=True, server_default=true())

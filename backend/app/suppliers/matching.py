@@ -10,6 +10,8 @@ from app.catalogue.listings import eligible_listings
 from app.core.errors import ValidationFailed
 from app.freight import service as freight
 from app.pricing.constants import SUPPORTED_UNITS
+from app.suppliers.freight import quote as supplier_quote
+from app.suppliers.ranking import adjusted_total, comparison_factor
 from app.suppliers.service import performance
 
 PIN = re.compile(r"^[1-9][0-9]{5}$")
@@ -65,6 +67,37 @@ def _freight_reason(status: str, match: str | None, amount: Decimal | None, curr
     return f"Freight {shown} is estimated"
 
 
+def _comparison(session: Session, listing, quantity: Decimal, destination: str, rates: dict) -> dict:
+    material = _money(listing.asking_price * quantity, listing.currency)
+    factor, notes = comparison_factor(rates)
+    quoted = supplier_quote(session, listing.supplier.organisation, listing.currency, destination, quantity)
+    if quoted is None:
+        return {
+            "basis": None,
+            "freight": None,
+            "material": material,
+            "landed": None,
+            "factor": None,
+            "adjusted": None,
+            "notes": notes,
+            "place": None,
+        }
+    landed_amount = (listing.asking_price * quantity) + quoted["freight"]
+    landed = _money(landed_amount, listing.currency)
+    adjusted = _money(adjusted_total(landed_amount, factor), listing.currency)
+    basis = "Saved lane" if quoted["basis"] == "lane" else "Rate per km"
+    return {
+        "basis": quoted["basis"],
+        "freight": _money(quoted["freight"], listing.currency),
+        "material": material,
+        "landed": landed,
+        "factor": f"{factor:.4f}",
+        "adjusted": adjusted,
+        "notes": [basis, *notes],
+        "place": None,
+    }
+
+
 def match_suppliers(
     session: Session,
     *,
@@ -108,6 +141,12 @@ def match_suppliers(
             ),
             f"Availability is {AVAILABILITY_LABEL.get(listing.availability, listing.availability)}",
         ]
+        if listing.availability == "on_request":
+            reasons.append("Supply is unconfirmed. Ask this supplier, and place an order only after they accept.")
+        elif listing.maximum_quantity is not None and quantity > listing.maximum_quantity:
+            reasons.append(
+                f"Quantity {_quantity_text(quantity)} {unit} is above the {_quantity_text(listing.maximum_quantity)} {listing.uom} this supplier said they can spare"
+            )
         if origin:
             label = f" ({quote['origin_label']})" if quote["origin_label"] else ""
             reasons.append(f"Dispatch PIN {origin}{label}")
@@ -123,6 +162,7 @@ def match_suppliers(
             "organisation_id": listing.supplier.organisation_id,
             "asking_price": _money(listing.asking_price, listing.currency),
             "minimum_quantity": _quantity_text(listing.minimum_quantity),
+            "maximum_quantity": _quantity_text(listing.maximum_quantity) if listing.maximum_quantity is not None else None,
             "uom": listing.uom,
             "availability": listing.availability,
             "origin_pin": origin,
@@ -133,7 +173,12 @@ def match_suppliers(
             "freight_match": quote["match"] if freight_status == "estimated" else None,
             "reasons": reasons,
             **rates,
+            "comparison": _comparison(session, listing, quantity, pin, rates),
         })
+    ranked = [row for row in rows if row["comparison"]["adjusted"] is not None]
+    ranked.sort(key=lambda row: (Decimal(row["comparison"]["adjusted"]["amount"]), row["organisation"].casefold()))
+    for index, row in enumerate(ranked[:3], start=1):
+        row["comparison"]["place"] = index
     rows.sort(key=lambda row: (
         Decimal(row["asking_price"]["amount"]),
         0 if row["freight_status"] == "estimated" else 1,

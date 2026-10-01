@@ -136,11 +136,12 @@ def test_comparison_keeps_each_suppliers_offer_and_snapshots_the_request(client,
         room = client.get(f"{NEGOTIATIONS}/{row['negotiationId']}", headers=buyer).json()
         assert room["destinationPin"] == "560001"
         assert room["requiredBy"] == "2026-10-15" and room["paymentTerms"] == "30 days"
+        assert room["deliveryNote"] == "Delivery date has not been offered"
         assert len(room["versions"]) == 1
     first = rows[str(world.users["supplier"].id)]
     second = rows[str(other.id)]
-    assert client.post(f"{NEGOTIATIONS}/{first['negotiationId']}/offers", json={"offeredPrice": "99.5000"}, headers=as_user(world, "supplier")).status_code == 201
-    assert client.post(f"{NEGOTIATIONS}/{second['negotiationId']}/offers", json={"offeredPrice": "88.0000"}, headers=as_actor(other)).status_code == 201
+    assert client.post(f"{NEGOTIATIONS}/{first['negotiationId']}/offers", json={"offeredPrice": "99.5000", "deliveryDate": "2026-10-15"}, headers=as_user(world, "supplier")).status_code == 201
+    assert client.post(f"{NEGOTIATIONS}/{second['negotiationId']}/offers", json={"offeredPrice": "88.0000", "deliveryDate": "2026-10-15"}, headers=as_actor(other)).status_code == 201
     compared = {row["supplierUserId"]: row for row in client.get(f"{REQUESTS}/{draft['id']}", headers=buyer).json()["suppliers"]}
     assert compared[str(world.users["supplier"].id)]["latestOffer"]["amount"] == "99.5000"
     assert compared[str(other.id)]["latestOffer"]["amount"] == "88.0000"
@@ -159,9 +160,61 @@ def test_comparison_keeps_each_suppliers_offer_and_snapshots_the_request(client,
     assert quote["currentAverage"]["amount"] == "95.1250"
     assert quote["versusSnapshot"]["amount"] == "4.3750"
     assert quote["versusAverage"]["amount"] == "4.3750"
-    assert len(client.get(f"{NEGOTIATIONS}/{first['negotiationId']}", headers=buyer).json()["versions"]) == 2
+    room = client.get(f"{NEGOTIATIONS}/{first['negotiationId']}", headers=buyer).json()
+    assert len(room["versions"]) == 2
+    assert room["deliveryNote"] == "On the requested date"
+    assert room["versions"][1]["deliveryDate"] == "2026-10-15"
+    assert room["versions"][0]["deliveryDate"] is None
     omitted = client.post(REQUESTS, json=_body(product), headers=buyer).json()
     assert omitted["requiredBy"] is None
+
+
+def test_supplier_delivery_date_is_measured_against_the_fixed_request(client, world, product):
+    _create(client, world, product)
+    buyer = as_user(world, "buyer")
+    supplier = as_user(world, "supplier")
+    created = client.post(
+        REQUESTS,
+        json=_body(product, requiredBy="2026-10-15", supplierUserIds=[str(world.users["supplier"].id)]),
+        headers=buyer,
+    )
+    assert created.status_code == 201, created.text
+    sent = client.post(f"{REQUESTS}/{created.json()['id']}/send", headers=buyer)
+    assert sent.status_code == 200, sent.text
+    negotiation_id = sent.json()["suppliers"][0]["negotiationId"]
+    missing = client.post(f"{NEGOTIATIONS}/{negotiation_id}/offers", json={"offeredPrice": "99"}, headers=supplier)
+    assert missing.status_code == 422
+    early = client.post(
+        f"{NEGOTIATIONS}/{negotiation_id}/offers",
+        json={"offeredPrice": "99", "deliveryDate": "2026-10-11"},
+        headers=supplier,
+    )
+    assert early.status_code == 201, early.text
+    assert early.json()["requiredBy"] == "2026-10-15"
+    assert early.json()["deliveryNote"] == "4 days before the requested date"
+    blocked = client.post(
+        f"{NEGOTIATIONS}/{negotiation_id}/offers",
+        json={"offeredPrice": "98", "deliveryDate": "2026-10-01"},
+        headers=buyer,
+    )
+    assert blocked.status_code == 422
+    kept = client.post(f"{NEGOTIATIONS}/{negotiation_id}/offers", json={"offeredPrice": "98"}, headers=buyer)
+    assert kept.status_code == 201, kept.text
+    assert kept.json()["deliveryNote"] == "4 days before the requested date"
+    assert kept.json()["versions"][-1]["deliveryDate"] is None
+    later = client.post(
+        f"{NEGOTIATIONS}/{negotiation_id}/offers",
+        json={"offeredPrice": "99.25", "deliveryDate": "2026-10-19"},
+        headers=supplier,
+    )
+    assert later.status_code == 201, later.text
+    assert later.json()["deliveryNote"] == "4 days after the requested date"
+    assert later.json()["versions"][-1]["deliveryDate"] == "2026-10-19"
+    assert client.post(f"{NEGOTIATIONS}/{negotiation_id}/offers", json={"offeredPrice": "97.90"}, headers=buyer).status_code == 201
+    unchanged = client.post(f"{NEGOTIATIONS}/{negotiation_id}/offers", json={"offeredPrice": "99.10"}, headers=supplier)
+    assert unchanged.status_code == 201, unchanged.text
+    assert unchanged.json()["deliveryNote"] == "4 days after the requested date"
+    assert unchanged.json()["versions"][-1]["deliveryDate"] == "2026-10-19"
 
 
 def test_ineligible_supplier_is_rejected_and_a_draft_can_be_cancelled(client, world, product):

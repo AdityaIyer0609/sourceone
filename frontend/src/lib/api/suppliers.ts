@@ -22,6 +22,7 @@ export interface SupplierProfile {
     name: string
     uom: string
     minimumQuantity: string
+    maximumQuantity: string | null
     askingPrice: Money
     availability: 'in_stock' | 'limited' | 'on_request'
   }[]

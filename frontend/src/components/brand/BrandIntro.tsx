@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { animate, motion } from "motion/react";
+import { bindBrandSound } from "./brandSound";
 
 const WORD = "PLENZA";
 const SUBTITLE = "by HCP Plastene Bulkpack Limited";
@@ -113,6 +114,8 @@ export function BrandIntro({ onReveal, onDone }: { onReveal: () => void; onDone:
       };
     }
 
+    const sound = bindBrandSound();
+
     const pin = () => {
       const mark = markRef.current;
       if (!mark || pinned) return;
@@ -129,6 +132,7 @@ export function BrandIntro({ onReveal, onDone }: { onReveal: () => void; onDone:
       const glow = glowRef.current;
       const target = document.querySelector("[data-brand-mark]");
       if (!mark || !(target instanceof HTMLElement) || flight) return;
+      sound.whoosh();
       const from = mark.getBoundingClientRect();
       const dest = destinationRect(target);
       const dx = dest.left - from.left;
@@ -180,8 +184,10 @@ export function BrandIntro({ onReveal, onDone }: { onReveal: () => void; onDone:
       const t = (now - started) / 1000;
       const nextWord = t < LETTER_START ? 0 : Math.min(WORD.length, Math.floor((t - LETTER_START) / LETTER_STEP) + 1);
       if (nextWord !== wordCount) {
+        const previous = wordCount;
         wordCount = nextWord;
         setWord(WORD.slice(0, nextWord));
+        for (let index = Math.max(previous, 0); index < nextWord; index += 1) sound.letter(index);
       }
       if (t >= SUBTITLE_ON) setSubtitleOn(true);
       if (t >= SUBTITLE_GONE) setSubtitleGone(true);
@@ -193,6 +199,7 @@ export function BrandIntro({ onReveal, onDone }: { onReveal: () => void; onDone:
       if (t >= FLY_AT) fly();
       if (t >= LAND_AT && !revealed) {
         revealed = true;
+        sound.settle();
         const target = document.querySelector("[data-brand-mark]");
         if (target instanceof HTMLElement) {
           const dest = destinationRect(target);
@@ -225,6 +232,7 @@ export function BrandIntro({ onReveal, onDone }: { onReveal: () => void; onDone:
       cancelAnimationFrame(raf);
       flight?.stop();
       glowFlight?.stop();
+      sound.stop();
       if (!finished) delete root.dataset.brandEnter;
     };
   }, []);

@@ -13,6 +13,7 @@ export interface LandedSupplier {
   askingPrice?: string
   originPin?: string | null
   originLabel?: string | null
+  availability?: "in_stock" | "limited" | "on_request"
 }
 
 export function LandedCostPreviewModal({
@@ -73,6 +74,7 @@ export function LandedCostPreviewModal({
           ))}
         </select>
       </label>
+      {supplier?.availability === "on_request" && <p className="request-note">Supply is unconfirmed. This estimate does not mean the material is ready.</p>}
       {error && <p className="negative">{error}</p>}
       {estimate && (
         <div className="freight-basis" role="group" aria-label="Freight basis">
