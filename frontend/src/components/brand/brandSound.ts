@@ -18,21 +18,44 @@ export const BRAND_SOUND = {
 } as const;
 
 const TICKS = [tickP, tickL, tickE, tickN, tickZ, tickA];
-/** Extra delay after the letter appears, so the six ticks are not identical. */
+/** A few milliseconds of difference, on top of the even letter spacing. */
 const TICK_DELAY_MS = [0, 18, 8, 26, 11, 16];
-const SOURCES = [...TICKS, accentUrl, whooshUrl, settleUrl];
+const ONE_SHOTS = [whooshUrl, settleUrl];
 
 const primed = new Map<string, HTMLAudioElement>();
 let active: symbol | null = null;
+let context: AudioContext | null = null;
+let tickBuffers: AudioBuffer[] | null = null;
+let accentBuffer: AudioBuffer | null = null;
+let preparing: Promise<void> | null = null;
 
-function preload() {
-  for (const src of SOURCES) {
+function preloadOneShots() {
+  for (const src of ONE_SHOTS) {
     if (primed.has(src)) continue;
     const node = new Audio(src);
     node.preload = "auto";
     node.load();
     primed.set(src, node);
   }
+}
+
+async function decode(url: string, audio: AudioContext) {
+  const response = await fetch(url);
+  const data = await response.arrayBuffer();
+  return audio.decodeAudioData(data);
+}
+
+function prepare() {
+  if (!preparing) {
+    preparing = (async () => {
+      const audio = new AudioContext();
+      context = audio;
+      if (audio.state === "suspended") await audio.resume().catch(() => undefined);
+      tickBuffers = await Promise.all(TICKS.map((url) => decode(url, audio)));
+      accentBuffer = await decode(accentUrl, audio);
+    })().catch(() => undefined);
+  }
+  return preparing;
 }
 
 function play(src: string, level: number) {
@@ -49,50 +72,94 @@ function play(src: string, level: number) {
 }
 
 export type BrandSound = {
-  letter: (index: number) => void;
+  ready: () => Promise<void>;
+  /** Queue every letter tick on the audio clock. A late frame cannot bunch them. */
+  playLetters: (startSec: number, stepSec: number) => void;
   whoosh: () => void;
   settle: () => void;
   stop: () => void;
 };
 
-const silent: BrandSound = { letter() {}, whoosh() {}, settle() {}, stop() {} };
+const silent: BrandSound = { ready: () => Promise.resolve(), playLetters() {}, whoosh() {}, settle() {}, stop() {} };
+
+function level(cue: number) {
+  return Math.min(1, Math.max(0, BRAND_SOUND.master * cue));
+}
 
 /** Starts only for the current intro. A second sign-in click does not stack another score. */
 export function bindBrandSound(): BrandSound {
   if (active) return silent;
   const token = Symbol("brand-sound");
   active = token;
-  preload();
+  preloadOneShots();
+  const preparing = prepare();
+  const voices: AudioBufferSourceNode[] = [];
   const timers: number[] = [];
-  const heard = new Set<string>();
+  let lettersQueued = false;
 
-  const once = (key: string, run: () => void) => {
-    if (active !== token || heard.has(key)) return;
-    heard.add(key);
-    run();
+  const onceWhoosh = { played: false };
+  const onceSettle = { played: false };
+
+  const cue = (buffer: AudioBuffer, at: number, gainValue: number) => {
+    if (!context || active !== token) return;
+    const gain = context.createGain();
+    gain.gain.value = gainValue;
+    const source = context.createBufferSource();
+    source.buffer = buffer;
+    source.connect(gain);
+    gain.connect(context.destination);
+    voices.push(source);
+    try {
+      source.start(at);
+    } catch {
+      /* The animation continues if playback is blocked. */
+    }
   };
 
   return {
-    letter(index) {
-      const src = TICKS[index];
-      if (!src) return;
-      const delay = TICK_DELAY_MS[index] ?? 0;
-      const timer = window.setTimeout(() => {
-        once(`tick-${index}`, () => play(src, BRAND_SOUND.tick));
-        if (index === TICKS.length - 1) once("accent", () => play(accentUrl, BRAND_SOUND.accent));
-      }, delay);
-      timers.push(timer);
+    ready: () => preparing,
+    playLetters(startSec, stepSec) {
+      if (active !== token || lettersQueued) return;
+      lettersQueued = true;
+      if (context && context.state === "running" && tickBuffers && accentBuffer) {
+        const base = context.currentTime + startSec;
+        tickBuffers.forEach((buffer, index) => {
+          const at = base + index * stepSec + (TICK_DELAY_MS[index] ?? 0) / 1000;
+          cue(buffer, at, level(BRAND_SOUND.tick));
+          if (index === tickBuffers!.length - 1 && accentBuffer) cue(accentBuffer, at, level(BRAND_SOUND.accent));
+        });
+        return;
+      }
+      TICKS.forEach((src, index) => {
+        const ms = (startSec + index * stepSec) * 1000 + (TICK_DELAY_MS[index] ?? 0);
+        timers.push(window.setTimeout(() => {
+          if (active !== token) return;
+          play(src, BRAND_SOUND.tick);
+          if (index === TICKS.length - 1) play(accentUrl, BRAND_SOUND.accent);
+        }, ms));
+      });
     },
     whoosh() {
-      once("whoosh", () => play(whooshUrl, BRAND_SOUND.whoosh));
+      if (onceWhoosh.played) return;
+      onceWhoosh.played = true;
+      play(whooshUrl, BRAND_SOUND.whoosh);
     },
     settle() {
-      once("settle", () => play(settleUrl, BRAND_SOUND.settle));
+      if (onceSettle.played) return;
+      onceSettle.played = true;
+      play(settleUrl, BRAND_SOUND.settle);
     },
     stop() {
       if (active !== token) return;
       active = null;
       for (const timer of timers) window.clearTimeout(timer);
+      for (const source of voices) {
+        try {
+          source.stop();
+        } catch {
+          /* Already finished. */
+        }
+      }
       for (const node of primed.values()) {
         try {
           node.pause();

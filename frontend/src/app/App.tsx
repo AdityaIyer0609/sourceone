@@ -3,6 +3,7 @@ import { RouterProvider } from 'react-router-dom'
 import { BrandIntro } from '../components/brand/BrandIntro'
 import { LoginPage } from '../pages/LoginPage'
 import { onSessionChange, readSession, type Session } from '../lib/api/auth'
+import { paths } from './paths'
 import { router } from './router'
 
 export function App() {
@@ -29,6 +30,7 @@ export function App() {
   }, [holdLogin])
 
   const begin = (next: Session) => {
+    void router.navigate(paths.marketplace, { replace: true })
     setSession(next)
     setReveal(false)
     setPhase('enter')

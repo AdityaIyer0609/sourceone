@@ -184,10 +184,8 @@ export function BrandIntro({ onReveal, onDone }: { onReveal: () => void; onDone:
       const t = (now - started) / 1000;
       const nextWord = t < LETTER_START ? 0 : Math.min(WORD.length, Math.floor((t - LETTER_START) / LETTER_STEP) + 1);
       if (nextWord !== wordCount) {
-        const previous = wordCount;
         wordCount = nextWord;
         setWord(WORD.slice(0, nextWord));
-        for (let index = Math.max(previous, 0); index < nextWord; index += 1) sound.letter(index);
       }
       if (t >= SUBTITLE_ON) setSubtitleOn(true);
       if (t >= SUBTITLE_GONE) setSubtitleGone(true);
@@ -221,8 +219,9 @@ export function BrandIntro({ onReveal, onDone }: { onReveal: () => void; onDone:
       raf = requestAnimationFrame((frame) => step(frame, started));
     };
 
-    void waitForKings().then(() => {
+    void Promise.all([waitForKings(), sound.ready()]).then(() => {
       if (cancelled) return;
+      sound.playLetters(LETTER_START, LETTER_STEP);
       const started = performance.now();
       raf = requestAnimationFrame((frame) => step(frame, started));
     });
