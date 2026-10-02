@@ -14,6 +14,7 @@ export type OperationsScreen =
   | 'User Management'
   | 'Approvals'
   | 'Company'
+  | 'Assign orders'
 
 export interface OperationsConfig {
   kicker: string
@@ -37,4 +38,5 @@ export const operationsConfigs: Record<OperationsScreen, OperationsConfig> = {
   'User Management': { kicker: 'ADMINISTRATION', title: 'User management', description: 'Create Plenza accounts and assign a role. Only a platform admin can do this.' },
   Approvals: { kicker: 'COMPANY', title: 'Approvals', description: 'New orders are placed directly at any material total. This list is only for requests that were already waiting.' },
   Company: { kicker: 'COMPANY', title: 'Company', description: 'People in this company, and the material total that needs a second person before an order is placed.' },
+  'Assign orders': { kicker: 'ADMINISTRATION', title: 'Assign orders', description: 'Choose which supplier fulfils a customer order. The customer’s price stays as placed.' },
 }

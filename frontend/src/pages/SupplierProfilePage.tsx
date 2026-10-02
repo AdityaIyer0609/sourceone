@@ -1,8 +1,9 @@
 import { useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, Navigate, useParams } from "react-router-dom";
 import { paths } from "../app/paths";
 import { AsyncContent } from "../components/feedback/AsyncContent";
 import { Badge, Button, Heading, Input } from "../components/ui";
+import { readSession } from "../lib/api/auth";
 import { getErrorMessage } from "../lib/api/client";
 import { getSupplierProfile, saveServiceRegions, saveVerification, type CountRate, type SupplierProfile } from "../lib/api/suppliers";
 import { useApiQuery } from "../lib/api/useApiQuery";
@@ -18,6 +19,7 @@ function responseValue(profile: SupplierProfile) {
 
 export function SupplierProfilePage() {
   const { organisationId = "" } = useParams();
+  if (readSession()?.user.hideSuppliers) return <Navigate to={paths.marketplace} replace />;
   const profile = useApiQuery(organisationId ? `supplier:${organisationId}` : null, (signal) => getSupplierProfile(organisationId, signal));
   const data = profile.data;
   const [regions, setRegions] = useState<{ label: string; pinPrefix: string }[] | null>(null);

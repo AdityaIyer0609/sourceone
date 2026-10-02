@@ -30,6 +30,24 @@ def _events(world, order_id):
     ).all()
 
 
+def test_status_can_move_when_the_placed_event_is_ahead_of_the_clock(client, world, product):
+    from datetime import timedelta
+
+    from app.core.clock import utcnow
+    from app.orders import service
+
+    negotiation = _negotiation(world, product)
+    order = service.create_from_negotiation(
+        world.session, world.actors["buyer"], negotiation.id, destination_pin="560076",
+        now=utcnow() + timedelta(days=3),
+    )
+    moved = _move(client, world, order.id, "confirmed")
+    assert moved.status_code == 200, moved.text
+    events = _events(world, order.id)
+    assert events[-1].to_status == "confirmed"
+    assert events[-1].created_at > events[0].created_at
+
+
 def test_supplier_progresses_through_full_flow(client, world, product):
     order_id = _order(client, world, product)
     tracking = _tracking(client, world, order_id, "supplier").json()

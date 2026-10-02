@@ -206,7 +206,7 @@ def _order_row(session: Session, order) -> dict:
         "id": order.id,
         "reference": order.order_number,
         "product_name": order.product.name,
-        "counterparty": order.supplier.organisation.name,
+        "counterparty": order.supplier.organisation.name if order.supplier is not None else "",
         "quantity": order.quantity,
         "uom": order.uom,
         "value": order.total_value,

@@ -3,11 +3,11 @@
 import re
 import uuid
 from collections.abc import Sequence
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Literal
 
-from sqlalchemy import or_, select, text
+from sqlalchemy import func, or_, select, text
 from sqlalchemy.orm import Session, selectinload
 
 from app.catalogue import products as catalogue
@@ -87,11 +87,144 @@ def _freight_snapshot(session: Session, negotiation: Negotiation, accepted, pin:
     }
 
 
+def place_for_assignment(
+    session: Session, actor: Actor, *, product_code: str, quantity: Decimal, destination_pin: str,
+    freight_basis: str = "standard", payment_terms: str | None = None, now: datetime | None = None,
+) -> Order:
+    """Buyer places an order at the current asking-price average. No supplier is attached yet."""
+    from app.identity.privacy import suppliers_hidden
+    if not suppliers_hidden(actor):
+        raise ValidationFailed("Choose a supplier when placing this order")
+    actor.require(OrderPermission.PLACE)
+    if not actor.has(NegotiationPermission.BUY):
+        raise PermissionDenied("Only a buyer can place an order")
+    now = now or utcnow()
+    product = catalogue.get_active_product(session, product_code)
+    pin = destination_pin.strip()
+    if not re.fullmatch(r"[1-9][0-9]{5}", pin):
+        raise ValidationFailed("Delivery PIN must be 6 digits", details={"destinationPin": pin})
+    if freight_basis not in ("standard", "distance"):
+        raise ValidationFailed("Choose normal freight or road distance", details={"freightBasis": freight_basis})
+    series = next((item for item in catalogue.buyer_series(product)), None)
+    currency = series.currency if series is not None else "INR"
+    from app.catalogue import market_average
+    average = market_average.current_average(session, product.id, currency)
+    if average is None:
+        raise ValidationFailed("This product has no price yet")
+    unit = adjust_unit_price(average, payment_terms)
+    order = Order(
+        order_number=_next_number(session, now),
+        negotiation_id=None,
+        negotiation_version_id=None,
+        buyer_user_id=actor.user_id,
+        supplier_user_id=None,
+        product_id=product.id,
+        quantity=quantity,
+        uom=product.uom,
+        currency=currency,
+        agreed_unit_price=unit,
+        total_value=order_total(quantity, unit),
+        destination_pin=pin,
+        freight_status="on_request",
+        freight_amount=None,
+        freight_match=None,
+        requirements=requirement_snapshot(product),
+        status=OrderStatus.PLACED,
+        created_at=now,
+        updated_at=now,
+    )
+    session.add(order)
+    session.flush()
+    _record_event(session, order, None, actor, note=None, now=now)
+    return order
+
+
+def assign_supplier(
+    session: Session, actor: Actor, order_id: uuid.UUID, supplier_user_id: uuid.UUID, *, now: datetime | None = None,
+) -> Order:
+    """Admin attaches one supplier. The customer's price stays as placed. Stock moves here."""
+    from app.identity.constants import IdentityPermission
+    from app.identity.privacy import suppliers_hidden
+    from app.pricing.constants import PricingPermission
+    if suppliers_hidden(actor) or not (
+        actor.has(IdentityPermission.MANAGE) or actor.has(PricingPermission.CONFIGURE) or actor.has(PricingPermission.PUBLISH)
+    ):
+        raise PermissionDenied("Only an admin can assign a supplier")
+    now = now or utcnow()
+    order = session.scalar(
+        select(Order).where(Order.id == order_id).options(
+            selectinload(Order.product), selectinload(Order.buyer),
+        ).with_for_update()
+    )
+    if order is None:
+        raise NotFound("Order not found", details={"orderId": str(order_id)})
+    if order.supplier_user_id is not None or order.status != OrderStatus.PLACED:
+        raise InvalidStateTransition("This order already has a supplier", details={"status": order.status})
+    listing = session.scalar(
+        select(SupplierListing).where(
+            SupplierListing.supplier_user_id == supplier_user_id,
+            SupplierListing.product_id == order.product_id,
+            SupplierListing.is_active.is_(True),
+        ).with_for_update()
+    )
+    if listing is None:
+        raise NotFound("That supplier is not listing this product")
+    if listing.sold_out:
+        raise ValidationFailed("This supplier is sold out")
+    if listing.maximum_quantity is not None and order.quantity > listing.maximum_quantity:
+        raise ValidationFailed(
+            "This supplier does not have that much left",
+            details={"available": f"{listing.maximum_quantity.normalize():f}"},
+        )
+    buyer = Actor(user_id=order.buyer_user_id, permissions=frozenset({NegotiationPermission.BUY, OrderPermission.PLACE}))
+    negotiation = negotiations.create_negotiation(
+        session, buyer, product_code=order.product.product_code, quantity=order.quantity,
+        supplier_user_id=supplier_user_id, destination_pin=order.destination_pin,
+        currency=order.currency, now=now, message="Customer order.",
+    )
+    version = NegotiationVersion(
+        negotiation_id=negotiation.id,
+        version_number=1,
+        created_by_user_id=order.buyer_user_id,
+        offered_price=order.agreed_unit_price,
+        currency=order.currency,
+        quantity=order.quantity,
+        uom=order.uom,
+        message="Customer order.",
+        created_at=now,
+    )
+    session.add(version)
+    session.flush()
+    negotiation.status = NegotiationStatus.OPEN
+    negotiation.updated_at = now
+    session.flush()
+    negotiation.accepted_version_id = version.id
+    negotiation.status = NegotiationStatus.ACCEPTED
+    negotiation.closed_at = now
+    negotiation.closed_by_user_id = order.buyer_user_id
+    negotiation.updated_at = now
+    session.flush()
+    order.supplier_user_id = supplier_user_id
+    order.negotiation_id = negotiation.id
+    order.negotiation_version_id = version.id
+    order.updated_at = now
+    snapshot = _freight_snapshot(session, negotiation, version, order.destination_pin or "", "standard")
+    order.freight_status = snapshot["status"]
+    order.freight_amount = snapshot["amount"]
+    order.freight_match = snapshot["match"]
+    session.flush()
+    take_stock(session, supplier_user_id, order.product_id, order.quantity)
+    return order
+
+
 def place_at_asking_price(
     session: Session, actor: Actor, *, product_code: str, supplier_user_id: uuid.UUID, quantity: Decimal,
     destination_pin: str, freight_basis: str = "standard", payment_terms: str | None = None, now: datetime | None = None,
 ) -> Order:
     """Buy the listing at its asking price. No counter-offer. Stock moves only if the order is created."""
+    from app.identity.privacy import suppliers_hidden
+    if suppliers_hidden(actor):
+        raise PermissionDenied("Place the order for the product. A supplier is assigned afterwards.")
     actor.require(OrderPermission.PLACE)
     now = now or utcnow()
     product = catalogue.get_active_product(session, product_code)
@@ -150,6 +283,9 @@ def create_from_negotiation(
     session: Session, actor: Actor, negotiation_id: uuid.UUID, *, destination_pin: str,
     freight_basis: str = "standard", now: datetime | None = None,
 ) -> Order:
+    from app.identity.privacy import suppliers_hidden
+    if suppliers_hidden(actor):
+        raise PermissionDenied("Place the order for the product. A supplier is assigned afterwards.")
     actor.require(OrderPermission.PLACE)
     now = now or utcnow()
     # Lock the listing before the negotiation so a second order cannot deadlock while stock is capped.
@@ -234,6 +370,11 @@ def _record_event(
     session: Session, order: Order, from_status: str | None, actor: Actor, *, note: str | None, now: datetime
 ) -> OrderStatusEvent:
     """Call after the order's new status is flushed; the database checks the event continues the history."""
+    latest = session.scalar(
+        select(func.max(OrderStatusEvent.created_at)).where(OrderStatusEvent.order_id == order.id)
+    )
+    if latest is not None and now <= latest:
+        now = latest + timedelta(microseconds=1)
     event = OrderStatusEvent(
         order_id=order.id, from_status=from_status, to_status=order.status, changed_by_user_id=actor.user_id,
         note=(note or "").strip() or None, created_at=now,
@@ -319,7 +460,7 @@ def _write_shipment(
 
 def is_delayed(order: Order, *, today: date | None = None) -> bool:
     """Late only when a required date is stored, has passed, and the order is still open."""
-    required = order.negotiation.required_by
+    required = order.negotiation.required_by if order.negotiation is not None else None
     if required is None or order.status in TERMINAL_STATUSES:
         return False
     return (today or business_today()) > required

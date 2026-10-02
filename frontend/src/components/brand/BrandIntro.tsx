@@ -40,20 +40,14 @@ function prefersReducedMotion() {
   return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
 
-/** Sidebar wordmark, including when the mobile drawer is translated off-screen. */
-function destinationRect(mark: HTMLElement): DOMRect {
-  const rect = mark.getBoundingClientRect();
-  const onScreen = rect.left >= 0 && rect.right <= window.innerWidth && rect.width > 0;
-  if (onScreen) return rect;
-  const sidebar = mark.closest(".sidebar");
-  if (!(sidebar instanceof HTMLElement)) return rect;
-  const sidebarRect = sidebar.getBoundingClientRect();
-  return new DOMRect(
-    sidebar.offsetLeft + (rect.left - sidebarRect.left),
-    sidebar.offsetTop + (rect.top - sidebarRect.top),
-    rect.width,
-    rect.height,
-  );
+/** The wordmark the flight can land on. On a phone the sidebar logo is off-screen, so the top-bar word is used. */
+function brandTarget(): HTMLElement | null {
+  const marks = [...document.querySelectorAll("[data-brand-mark]")].filter((node): node is HTMLElement => node instanceof HTMLElement);
+  const visible = marks.find((mark) => {
+    const rect = mark.getBoundingClientRect();
+    return rect.width > 0 && rect.top >= 0 && rect.left >= 0 && rect.left < window.innerWidth;
+  });
+  return visible ?? marks[0] ?? null;
 }
 
 async function waitForKings() {
@@ -130,11 +124,11 @@ export function BrandIntro({ onReveal, onDone }: { onReveal: () => void; onDone:
     const fly = () => {
       const mark = markRef.current;
       const glow = glowRef.current;
-      const target = document.querySelector("[data-brand-mark]");
-      if (!mark || !(target instanceof HTMLElement) || flight) return;
+      const target = brandTarget();
+      if (!mark || !target || flight) return;
       sound.whoosh();
       const from = mark.getBoundingClientRect();
-      const dest = destinationRect(target);
+      const dest = target.getBoundingClientRect();
       const dx = dest.left - from.left;
       const dy = dest.top - from.top;
       const scale = from.width > 0 ? dest.width / from.width : 1;
@@ -198,9 +192,9 @@ export function BrandIntro({ onReveal, onDone }: { onReveal: () => void; onDone:
       if (t >= LAND_AT && !revealed) {
         revealed = true;
         sound.settle();
-        const target = document.querySelector("[data-brand-mark]");
-        if (target instanceof HTMLElement) {
-          const dest = destinationRect(target);
+        const target = brandTarget();
+        if (target) {
+          const dest = target.getBoundingClientRect();
           revealX = dest.left + dest.width / 2;
           revealY = dest.top + dest.height / 2;
           revealCover = Math.hypot(dest.width, dest.height) / 2 + 6;

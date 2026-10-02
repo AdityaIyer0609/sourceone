@@ -43,10 +43,10 @@ class Order(UUIDPrimaryKey, Timestamps, Base):
 
     order_number: Mapped[str] = mapped_column(String(32), unique=True)
     # One order per accepted negotiation, including after cancellation.
-    negotiation_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("negotiations.id"), unique=True)
-    negotiation_version_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("negotiation_versions.id"))
+    negotiation_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("negotiations.id"), unique=True)
+    negotiation_version_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("negotiation_versions.id"))
     buyer_user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"))
-    supplier_user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"))
+    supplier_user_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"))
     product_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("products.id"), index=True)
     quantity: Mapped[Decimal] = mapped_column(QUANTITY)
     uom: Mapped[str] = mapped_column(String(16))
@@ -67,10 +67,10 @@ class Order(UUIDPrimaryKey, Timestamps, Base):
     cancelled_by_user_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"))
     cancel_reason: Mapped[str | None] = mapped_column(Text)
 
-    negotiation: Mapped[Negotiation] = relationship()
-    negotiation_version: Mapped[NegotiationVersion] = relationship()
+    negotiation: Mapped[Negotiation | None] = relationship()
+    negotiation_version: Mapped[NegotiationVersion | None] = relationship()
     buyer: Mapped[User] = relationship(foreign_keys=[buyer_user_id])
-    supplier: Mapped[User] = relationship(foreign_keys=[supplier_user_id])
+    supplier: Mapped[User | None] = relationship(foreign_keys=[supplier_user_id])
     product: Mapped[Product] = relationship()
     documents: Mapped[list["OrderDocument"]] = relationship(order_by="OrderDocument.created_at", viewonly=True)
     status_events: Mapped[list["OrderStatusEvent"]] = relationship(

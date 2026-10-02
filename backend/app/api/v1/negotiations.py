@@ -138,6 +138,10 @@ def _present(actor: Actor, db: Session, negotiation: Negotiation) -> schemas.Neg
 
 @router.post("", response_model=schemas.NegotiationOut, status_code=201)
 def create_negotiation(body: schemas.CreateNegotiationIn, db: DbSession, actor: Participant):
+    from app.core.errors import PermissionDenied
+    from app.identity.privacy import suppliers_hidden
+    if suppliers_hidden(actor):
+        raise PermissionDenied("Negotiations are not available")
     negotiation = service.create_negotiation(
         db, actor, product_code=body.product_code, series_code=body.series_code, quantity=body.quantity,
         offered_price=body.offered_price, message=body.message, currency=body.currency,
@@ -158,6 +162,9 @@ def list_suppliers(db: DbSession, actor: Participant):
 
 @router.get("", response_model=list[schemas.NegotiationOut])
 def list_negotiations(db: DbSession, actor: Participant, status: NegotiationStatus | None = None):
+    from app.identity.privacy import suppliers_hidden
+    if suppliers_hidden(actor):
+        return []
     return [_present(actor, db, n) for n in service.list_negotiations(db, actor, status=status)]
 
 

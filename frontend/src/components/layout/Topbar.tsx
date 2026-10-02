@@ -18,7 +18,7 @@ interface Notice {
 }
 
 function noticesFor(negotiations: Negotiation[], orders: Order[], approvals: OrderApproval[]): Notice[] {
-  const ordered = new Set(orders.map((order) => order.negotiation.id));
+  const ordered = new Set(orders.flatMap((order) => order.negotiation ? [order.negotiation.id] : []));
   const items: Notice[] = [];
   for (const item of negotiations) {
     const open = item.status === "draft" || item.status === "open" || item.status === "countered";
@@ -91,6 +91,7 @@ export function Topbar({ title, search, onMenu, onSearch }: { title: string; sea
   return (
     <header className="topbar">
       <Button variant="ghost" className="menu-button" onClick={onMenu} aria-label="Open navigation"><Menu size={20} /></Button>
+      <strong className="topbar__brand" data-brand-mark>PLENZA</strong>
       <div className="topbar__title"><small>PLENZA /</small><strong>{title}</strong></div>
       <label className="search-box">
         <Search size={18} />
@@ -127,7 +128,7 @@ export function Topbar({ title, search, onMenu, onSearch }: { title: string; sea
           </div>
         )}
       </div>
-      {buyer && <Button variant="dark" className="quick-order" onClick={() => navigate(paths.purchaseRequests)}><Plus size={17} /> New request</Button>}
+      {buyer && <Button variant="dark" className="quick-order" onClick={() => navigate(`${paths.orders}?new=1`)}><Plus size={17} /> Place order</Button>}
       </div>
     </header>
   );

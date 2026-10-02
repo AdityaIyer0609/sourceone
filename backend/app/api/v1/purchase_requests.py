@@ -140,11 +140,18 @@ def _present(actor: Actor, request: PurchaseRequest, db: DbSession) -> PurchaseR
 
 @router.get("", response_model=list[PurchaseRequestOut])
 def list_requests(db: DbSession, actor: Participant):
+    from app.identity.privacy import suppliers_hidden
+    if suppliers_hidden(actor):
+        return []
     return [_present(actor, row, db) for row in service.list_requests(db, actor)]
 
 
 @router.post("", response_model=PurchaseRequestOut, status_code=201)
 def create_request(body: PurchaseRequestIn, db: DbSession, actor: Participant):
+    from app.core.errors import PermissionDenied
+    from app.identity.privacy import suppliers_hidden
+    if suppliers_hidden(actor):
+        raise PermissionDenied("Purchase requests are not available")
     request = service.create_request(
         db, actor, product_code=body.product_code, quantity=body.quantity, uom=body.uom,
         destination_pin=body.destination_pin, message=body.message, supplier_user_ids=body.supplier_user_ids,

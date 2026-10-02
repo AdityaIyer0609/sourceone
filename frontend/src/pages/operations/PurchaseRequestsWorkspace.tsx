@@ -63,7 +63,7 @@ function freightText(request: PurchaseRequest) {
   return "Freight on request";
 }
 
-function RequestModal({ productCode, quantity, pin, price, supplierId, onClose, onCreated }: {
+export function RequestModal({ productCode, quantity, pin, price, supplierId, onClose, onCreated }: {
   productCode: string;
   quantity: string;
   pin: string;

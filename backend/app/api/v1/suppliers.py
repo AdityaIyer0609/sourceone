@@ -23,6 +23,10 @@ Viewer = Annotated[
 
 @router.get("/{organisation_id}", response_model=SupplierProfileOut)
 def get_supplier(organisation_id: uuid.UUID, db: DbSession, actor: Viewer):
+    from app.core.errors import PermissionDenied
+    from app.identity.privacy import suppliers_hidden
+    if suppliers_hidden(actor):
+        raise PermissionDenied("Supplier details are not available")
     return service.profile(db, actor, organisation_id)
 
 

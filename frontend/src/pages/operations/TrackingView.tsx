@@ -156,10 +156,10 @@ export function TrackingView() {
                 const party = order.viewerRole === "buyer" ? order.supplier : order.buyer;
                 return (
                   <tr key={order.id} className={order.id === selected?.id ? "is-selected" : undefined} onClick={() => setSearchParams({ id: order.id })}>
-                    <td><strong>{order.orderNumber}</strong><small>{order.negotiation.negotiationNumber}</small></td>
+                    <td><strong>{order.orderNumber}</strong>{order.negotiation && <small>{order.negotiation.negotiationNumber}</small>}</td>
                     <td><strong>{order.product.name}</strong><small>{order.product.productCode}</small></td>
                     <td>{Number(order.quantity).toLocaleString("en-IN")} {order.uom.toLowerCase()}</td>
-                    <td><strong><OrgLink organisationId={party.organisationId}>{party.organisation}</OrgLink></strong><small>{party.name}</small></td>
+                    <td>{party ? <><strong><OrgLink organisationId={party.organisationId}>{party.organisation}</OrgLink></strong><small>{party.name}</small></> : <small>—</small>}</td>
                     <td>{order.destinationPin ?? "—"}</td>
                     <td>{formatMoney(order.charges.payable, 2)}</td>
                     <td><OrderStatusBadge status={order.status} /></td>
@@ -173,7 +173,7 @@ export function TrackingView() {
       </section>
       {data && (
         <div className="tracking-layout">
-          <section className="tracking-map"><div className="map-grid"/><div className="route-path"><i className="origin"/><span/><Truck size={24}/><span/><i className="destination"/></div><div className="map-location map-location--a"><strong><OrgLink organisationId={data.supplier.organisationId}>{data.supplier.organisation}</OrgLink></strong><small>{milestone(data, "dispatched", "Not dispatched yet")}</small></div><div className="map-location map-location--b"><strong>{data.buyer.organisation}</strong><small>{milestone(data, "delivered", "Awaiting delivery")}</small></div></section>
+          <section className="tracking-map"><div className="map-grid"/><div className="route-path"><i className="origin"/><span/><Truck size={24}/><span/><i className="destination"/></div><div className="map-location map-location--a"><strong>{data.supplier ? <OrgLink organisationId={data.supplier.organisationId}>{data.supplier.organisation}</OrgLink> : "Dispatch"}</strong><small>{milestone(data, "dispatched", "Not dispatched yet")}</small></div><div className="map-location map-location--b"><strong>{data.buyer.organisation}</strong><small>{milestone(data, "delivered", "Awaiting delivery")}</small></div></section>
           <aside className="shipment-panel">
             <OrderStatusBadge status={data.status} />
             <Heading level={2}>{data.orderNumber}</Heading>

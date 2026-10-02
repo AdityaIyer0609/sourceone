@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { paths } from "../../app/paths";
 import { AsyncContent } from "../../components/feedback/AsyncContent";
 import { Badge, Button, Input } from "../../components/ui";
+import { readSession } from "../../lib/api/auth";
 import { getDashboard, type BuyerDashboard, type DashboardActivity } from "../../lib/api/dashboard";
 import { useApiQuery } from "../../lib/api/useApiQuery";
 import { formatDateTime, formatMoney, formatSignedMoney, titleCase } from "../../lib/pricingFormat";
@@ -37,6 +38,7 @@ export function DashboardWorkspace() {
   const [search, setSearch] = useState("");
   const dashboard = useApiQuery("buyer-dashboard", (signal) => getDashboard(signal));
   const data = dashboard.data ?? EMPTY;
+  const hideSuppliers = readSession()?.user.hideSuppliers === true;
   const activity = [...data.recentOrders, ...data.recentNegotiations].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   const term = search.trim().toLowerCase();
   const rows = activity.filter((row) => [row.reference, row.productName, row.counterparty, row.status].join(" ").toLowerCase().includes(term));
@@ -80,12 +82,13 @@ export function DashboardWorkspace() {
         ))}
       </section>
       <section className="section-block data-section">
-        <div className="section-title"><div><small>MATERIAL SPEND</small><p>By supplier and product. Cancelled orders are excluded.</p></div></div>
-        {data.spendBySupplier.length === 0 ? <p className="request-note">No material spend yet.</p> : (
+        <div className="section-title"><div><small>MATERIAL SPEND</small><p>{hideSuppliers ? "By product. Cancelled orders are excluded." : "By supplier and product. Cancelled orders are excluded."}</p></div></div>
+        {!hideSuppliers && (data.spendBySupplier.length === 0 ? <p className="request-note">No material spend yet.</p> : (
           <div className="market-table-wrap"><table className="market-table"><thead><tr><th>Supplier</th><th>Orders</th><th>Material total</th></tr></thead><tbody>
             {data.spendBySupplier.map((row) => <tr key={`${row.label}:${row.currency}`}><td>{row.label}</td><td>{row.orderCount}</td><td>{formatMoney({ amount: row.amount, currency: row.currency }, 2)}</td></tr>)}
           </tbody></table></div>
-        )}
+        ))}
+        {hideSuppliers && data.spendByProduct.length === 0 && <p className="request-note">No material spend yet.</p>}
         {data.spendByProduct.length > 0 && (
           <div className="market-table-wrap"><table className="market-table"><thead><tr><th>Product</th><th>Orders</th><th>Material total</th></tr></thead><tbody>
             {data.spendByProduct.map((row) => <tr key={`${row.label}:${row.currency}`}><td>{row.label}</td><td>{row.orderCount}</td><td>{formatMoney({ amount: row.amount, currency: row.currency }, 2)}</td></tr>)}
@@ -112,7 +115,7 @@ export function DashboardWorkspace() {
         <div className="section-title"><div><small>DELIVERY</small><p>{data.delivery.note || "On-time delivery uses a required date stored on the negotiation."}</p></div></div>
         {data.delivery.available ? <p className="request-note">{data.delivery.onTime} of {data.delivery.delivered} delivered on time · {data.delivery.percent}%</p> : null}
       </section>
-      <section className="section-block data-section">
+      {!hideSuppliers && <section className="section-block data-section">
         <div className="section-title"><div><small>SUPPLIERS</small><p>Rates use only your negotiations and orders with that supplier.</p></div></div>
         {data.suppliers.length === 0 ? <p className="request-note">No suppliers in your negotiations or orders yet.</p> : (
           <div className="market-table-wrap"><table className="market-table"><thead><tr><th>Supplier</th><th>Acceptance</th><th>Order cancellation</th><th>Quality</th><th>Response</th></tr></thead><tbody>
@@ -127,7 +130,7 @@ export function DashboardWorkspace() {
             ))}
           </tbody></table></div>
         )}
-      </section>
+      </section>}
     </>
   );
 }

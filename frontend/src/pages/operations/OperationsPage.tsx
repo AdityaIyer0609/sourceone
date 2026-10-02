@@ -14,6 +14,7 @@ import { ReorderWorkspace } from "./ReorderWorkspace";
 import { RateManagementWorkspace } from "./RateManagementWorkspace";
 import { TrackingView } from "./TrackingView";
 import { UsersWorkspace } from "./UsersWorkspace";
+import { AssignOrdersWorkspace } from "./AssignOrdersWorkspace";
 import { ApprovalsWorkspace } from "./ApprovalsWorkspace";
 import { CompanyWorkspace } from "./CompanyWorkspace";
 import { ListingsWorkspace } from "./ListingsWorkspace";
@@ -36,11 +37,15 @@ const screenRoles: Record<OperationsScreen, readonly string[]> = {
   "User Management": ["platform_admin"],
   Approvals: ["approver"],
   Company: ["approver"],
+  "Assign orders": ["platform_admin", "pricing_admin"],
 };
+
+const HIDDEN_SCREENS = new Set<OperationsScreen>(["Freight Calculator", "Purchase Requests"]);
 
 export function OperationsPage({ screen }: { screen: OperationsScreen }) {
   const roles = readSession()?.user.roles ?? [];
   if (!canAccess(roles, screenRoles[screen])) return <Navigate to={paths.marketplace} replace />;
+  if (readSession()?.user.hideSuppliers && HIDDEN_SCREENS.has(screen)) return <Navigate to={paths.marketplace} replace />;
   const config = operationsConfigs[screen];
   const freight = screen === "Freight Calculator";
   const freightAdmin = screen === "Freight Management";
@@ -57,10 +62,11 @@ export function OperationsPage({ screen }: { screen: OperationsScreen }) {
   const users = screen === "User Management";
   const approvals = screen === "Approvals";
   const company = screen === "Company";
+  const assign = screen === "Assign orders";
   return (
     <div className="page">
       <div className="page-heading"><div><small>{config.kicker}</small><Heading level={1}>{config.title}</Heading><p>{config.description}</p></div></div>
-      {freight ? <FreightWorkbench /> : freightAdmin ? <FreightManagement /> : tracking ? <TrackingView /> : rates ? <RateManagementWorkspace /> : orders ? <OrdersWorkspace /> : reorder ? <ReorderWorkspace /> : dashboard ? <DashboardWorkspace /> : supplierHome ? <SupplierHome /> : listings ? <ListingsWorkspace /> : ownFreight ? <SupplierFreightWorkspace /> : items ? <ItemMasterWorkspace /> : requests ? <PurchaseRequestsWorkspace /> : users ? <UsersWorkspace /> : approvals ? <ApprovalsWorkspace /> : company ? <CompanyWorkspace /> : null}
+      {freight ? <FreightWorkbench /> : freightAdmin ? <FreightManagement /> : tracking ? <TrackingView /> : rates ? <RateManagementWorkspace /> : orders ? <OrdersWorkspace /> : reorder ? <ReorderWorkspace /> : dashboard ? <DashboardWorkspace /> : supplierHome ? <SupplierHome /> : listings ? <ListingsWorkspace /> : ownFreight ? <SupplierFreightWorkspace /> : items ? <ItemMasterWorkspace /> : requests ? <PurchaseRequestsWorkspace /> : users ? <UsersWorkspace /> : approvals ? <ApprovalsWorkspace /> : company ? <CompanyWorkspace /> : assign ? <AssignOrdersWorkspace /> : null}
     </div>
   );
 }

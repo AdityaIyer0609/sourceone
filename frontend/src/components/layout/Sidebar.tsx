@@ -1,9 +1,9 @@
 import { X } from "lucide-react";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { NavLink } from "react-router-dom";
 import { accountNav, commerceNav, controlCentreNav, visibleNav, type NavItem } from "../../app/navigation";
 import { paths } from "../../app/paths";
-import { readSession } from "../../lib/api/auth";
+import { currentUser, onSessionChange, readSession, saveSession } from "../../lib/api/auth";
 import { listNegotiations, onNegotiationsChanged } from "../../lib/api/negotiations";
 import { useApiQuery } from "../../lib/api/useApiQuery";
 import { Button } from "../ui";
@@ -25,12 +25,23 @@ function initials(name: string) {
   return name.split(" ").map((part) => part[0]).join("").slice(0, 2).toUpperCase() || "SO";
 }
 
+const PRIVATE_NAV = new Set<string>([paths.purchaseRequests, paths.negotiations, paths.freightCalculator]);
+
 export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const session = readSession();
+  const [session, setSession] = useState(readSession);
+  useEffect(() => onSessionChange(() => setSession(readSession())), []);
+  useEffect(() => {
+    const current = readSession();
+    if (!current) return;
+    currentUser().then((user) => {
+      if (user.hideSuppliers !== current.user.hideSuppliers || user.roles.join() !== current.user.roles.join()) {
+        saveSession({ ...current, user });
+      }
+    }).catch(() => undefined);
+  }, []);
   const name = session?.user.fullName ?? "Signed in";
   const roles = session?.user.roles ?? [];
-  const role = roles[0]?.replace(/_/g, " ") ?? "Account";
-  const commerce = visibleNav(commerceNav, roles);
+  const commerce = visibleNav(commerceNav, roles).filter((item) => !(session?.user.hideSuppliers && PRIVATE_NAV.has(item.to)));
   const control = visibleNav(controlCentreNav, roles);
   const account = visibleNav(accountNav, roles);
   const negotiations = useApiQuery(commerce.some((item) => item.to === paths.negotiations) ? "nav-negotiations" : null, (signal) => listNegotiations(signal));
@@ -42,10 +53,6 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
       <div className="sidebar__top">
         <Logo />
         <Button variant="ghost" className="mobile-close" onClick={onClose} aria-label="Close navigation"><X size={20} /></Button>
-      </div>
-      <div className="workspace-switcher">
-        <div className="avatar avatar--square">{initials(session?.user.organisation ?? "SO")}</div>
-        <div><strong>{session?.user.organisation ?? "Plenza"}</strong><small>{role}</small></div>
       </div>
       <nav className="nav-list" aria-label="Primary navigation">
         <small className="nav-kicker">COMMERCE</small>

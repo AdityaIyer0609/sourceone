@@ -1,5 +1,9 @@
 """Tests run against the configured PostgreSQL database inside a transaction that is always rolled back."""
 
+import os
+
+os.environ["HIDE_SUPPLIERS"] = "false"
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session

@@ -13,6 +13,7 @@ class UserOut(ApiModel):
     full_name: str
     organisation: str
     roles: list[str]
+    hide_suppliers: bool = False
 
 
 class LoginOut(ApiModel):

@@ -10,6 +10,8 @@ from app.api.deps import CurrentActor, DbSession
 from app.core.config import get_settings
 from app.core.errors import NotAuthenticated
 from app.identity.passwords import verify_password
+from app.identity.privacy import suppliers_hidden
+from app.identity.service import actor_for
 from app.identity.tokens import issue_token
 from app.models.identity import Role, User, UserRole
 from app.schemas.auth import LoginIn, LoginOut, UserOut
@@ -29,6 +31,7 @@ def _user_out(db: DbSession, user: User) -> UserOut:
         full_name=user.full_name,
         organisation=user.organisation.name,
         roles=roles,
+        hide_suppliers=suppliers_hidden(actor_for(db, user)),
     )
 
 

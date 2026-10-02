@@ -29,6 +29,32 @@ class NegotiationRefOut(ApiModel):
     accepted_version_number: int
 
 
+class PlaceForAssignmentIn(ApiModel):
+    product_code: str = Field(min_length=1, max_length=64)
+    quantity: Decimal = Field(gt=0, max_digits=18, decimal_places=3)
+    destination_pin: str = Field(min_length=6, max_length=6)
+    freight_basis: Literal["standard", "distance"] = "standard"
+    payment_terms: str | None = Field(default=None, max_length=120)
+
+
+class AssignSupplierIn(ApiModel):
+    supplier_user_id: uuid.UUID
+
+
+class UnassignedOrderOut(ApiModel):
+    id: uuid.UUID
+    order_number: str
+    product_code: str
+    product_name: str
+    quantity: str
+    uom: str
+    currency: str
+    unit_price: str
+    buyer_organisation: str
+    destination_pin: str | None
+    created_at: datetime
+
+
 class OrderActionsOut(ApiModel):
     cancel: bool
 
@@ -74,9 +100,9 @@ class OrderOut(ApiModel):
     freight_status: Literal["estimated", "on_request"] | None = None
     freight: Money | None = None
     freight_match: Literal["lane", "zone", "default", "distance"] | None = None
-    negotiation: NegotiationRefOut
+    negotiation: NegotiationRefOut | None = None
     buyer: PartyOut
-    supplier: PartyOut
+    supplier: PartyOut | None = None
     viewer_role: Literal["buyer", "supplier"]
     allowed_actions: OrderActionsOut
     created_at: datetime
@@ -138,7 +164,7 @@ class TrackingOut(ApiModel):
     quantity: str
     uom: str
     buyer: PartyOut
-    supplier: PartyOut
+    supplier: PartyOut | None = None
     viewer_role: Literal["buyer", "supplier"]
     next_status: OrderStatusName | None
     can_progress: bool
@@ -166,10 +192,10 @@ class ReorderItemOut(ApiModel):
     order_status: OrderStatusName
     product_code: str
     product_name: str
-    supplier_user_id: uuid.UUID
-    supplier_name: str
-    organisation: str
-    organisation_id: uuid.UUID
+    supplier_user_id: uuid.UUID | None = None
+    supplier_name: str | None = None
+    organisation: str | None = None
+    organisation_id: uuid.UUID | None = None
     quantity: str
     uom: str
     currency: str

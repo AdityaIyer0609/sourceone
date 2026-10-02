@@ -93,12 +93,18 @@ def update_listing(listing_id: uuid.UUID, body: ListingActiveIn, db: DbSession, 
 def match_product_suppliers(
     product_code: str,
     db: DbSession,
-    _: Viewer,
+    actor: Viewer,
     quantity: Annotated[Decimal, Query(gt=0)],
     uom: Annotated[str, Query(min_length=1)],
     destination_pin: Annotated[str, Query(alias="destinationPin", min_length=6, max_length=6)],
     currency: Annotated[str | None, Query()] = None,
 ):
+    from app.identity.privacy import suppliers_hidden
+    if suppliers_hidden(actor):
+        return SupplierMatchListOut(
+            product_code=product_code, quantity=f"{quantity.normalize():f}", uom=uom,
+            destination_pin=destination_pin, matches=[],
+        )
     return match_suppliers(
         db, product_code=product_code, quantity=quantity, uom=uom,
         destination_pin=destination_pin, currency=currency,
@@ -109,8 +115,12 @@ def match_product_suppliers(
 def list_product_listings(
     product_code: str,
     db: DbSession,
-    _: Viewer,
+    actor: Viewer,
     currency: Annotated[str | None, Query()] = None,
 ):
+    from app.identity.privacy import suppliers_hidden
     product = catalogue.get_active_product(db, product_code)
-    return [_out(listing) for listing in service.eligible_listings(db, product, currency=currency)]
+    rows = service.eligible_listings(db, product, currency=currency)
+    if suppliers_hidden(actor):
+        rows = [listing for listing in rows if listing.supplier_user_id == actor.user_id]
+    return [_out(listing) for listing in rows]

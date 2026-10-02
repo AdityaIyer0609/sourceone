@@ -36,7 +36,9 @@ def _document(document: ProductDocument) -> DocumentOut:
     )
 
 
-def _question(question: ProductQuestion) -> QuestionOut:
+def _question(question: ProductQuestion, actor: Actor | None = None) -> QuestionOut:
+    from app.identity.privacy import suppliers_hidden
+    hidden = actor is not None and suppliers_hidden(actor)
     return QuestionOut(
         id=question.id,
         body=question.body,
@@ -46,8 +48,10 @@ def _question(question: ProductQuestion) -> QuestionOut:
         created_at=question.created_at,
         answers=[
             AnswerOut(
-                id=answer.id, body=answer.body, supplier_name=answer.supplier.full_name,
-                organisation=answer.supplier.organisation.name, created_at=answer.created_at,
+                id=answer.id, body=answer.body,
+                supplier_name="Plenza" if hidden else answer.supplier.full_name,
+                organisation="Plenza" if hidden else answer.supplier.organisation.name,
+                created_at=answer.created_at,
             )
             for answer in question.answers
         ],
@@ -103,7 +107,7 @@ def list_questions(product_code: str, db: DbSession, actor: Viewer):
     return QuestionListOut(
         can_ask=actor.has(NegotiationPermission.BUY),
         can_answer=questions.can_answer(db, actor, product_code),
-        questions=[_question(row) for row in questions.list_questions(db, product_code)],
+        questions=[_question(row, actor) for row in questions.list_questions(db, product_code)],
     )
 
 
@@ -111,11 +115,11 @@ def list_questions(product_code: str, db: DbSession, actor: Viewer):
 def ask_question(product_code: str, body: QuestionIn, db: DbSession, actor: Buyer):
     question = questions.ask(db, actor, product_code, body.body)
     db.commit()
-    return _question(question)
+    return _question(question, actor)
 
 
 @router.post("/products/{product_code}/questions/{question_id}/answers", response_model=QuestionOut, status_code=201)
 def answer_question(product_code: str, question_id: uuid.UUID, body: QuestionIn, db: DbSession, actor: Supplier):
     question = questions.answer(db, actor, product_code, question_id, body.body)
     db.commit()
-    return _question(question)
+    return _question(question, actor)

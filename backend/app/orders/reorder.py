@@ -67,12 +67,16 @@ def _benchmark(session: Session, order: Order) -> tuple[Decimal | None, str | No
     return value, series.code
 
 
-def assess(session: Session, order: Order) -> dict:
+def assess(session: Session, order: Order, *, hide_supplier: bool = False) -> dict:
     listing = None
     if order.status not in ELIGIBLE_STATUSES:
         reason = "cancelled"
     elif not order.product.is_active:
         reason = "inactive_product"
+    elif hide_supplier:
+        reason = None
+    elif order.supplier is None:
+        reason = "no_listing"
     elif not catalogue_listings.can_supply(session, order.supplier):
         reason = "inactive_supplier"
     else:
@@ -90,7 +94,9 @@ def assess(session: Session, order: Order) -> dict:
 
 
 def list_reorderable(session: Session, actor: Actor) -> list[dict]:
-    return [assess(session, order) for order in _orders(session, actor)]
+    from app.identity.privacy import suppliers_hidden
+    hide = suppliers_hidden(actor)
+    return [assess(session, order, hide_supplier=hide) for order in _orders(session, actor)]
 
 
 def start_reorder(
@@ -101,6 +107,10 @@ def start_reorder(
     quantity: Decimal,
     destination_pin: str | None = None,
 ) -> dict:
+    from app.core.errors import PermissionDenied
+    from app.identity.privacy import suppliers_hidden
+    if suppliers_hidden(actor):
+        raise PermissionDenied("Place a new order for this product")
     actor.require(NegotiationPermission.BUY)
     if quantity <= 0:
         raise ValidationFailed("Quantity must be greater than zero", details={"quantity": str(quantity)})

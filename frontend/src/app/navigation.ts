@@ -59,6 +59,7 @@ export const controlCentreNav: NavItem[] = [
   { label: 'Rate Management', to: paths.rateManagement, icon: CircleDollarSign, roles: pricing },
   { label: 'Freight', to: paths.freightManagement, icon: Truck, roles: pricing },
   { label: 'User Management', to: paths.users, icon: Users, roles: ['platform_admin'] },
+  { label: 'Assign orders', to: paths.assignOrders, icon: ShoppingBag, roles: ['platform_admin', 'pricing_admin'] },
   { label: 'Company', to: paths.company, icon: Building2, roles: ['approver'] },
 ]
 

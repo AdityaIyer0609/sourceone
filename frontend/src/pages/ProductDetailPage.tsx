@@ -12,15 +12,17 @@ import { ProductVisual } from "../components/product/ProductVisual";
 import { SupplierComparison } from "../components/product/SupplierComparison";
 import { OrgLink } from "../components/supplier/OrgLink";
 import { Badge, Button, Heading, Input } from "../components/ui";
+import { readSession } from "../lib/api/auth";
 import { getErrorMessage } from "../lib/api/client";
 import { getMaterialEstimate, type BenchmarkSummary } from "../lib/api/pricing";
 import { listProductListings, listSupplierMatches } from "../lib/api/listings";
 import { startNegotiation } from "../lib/api/negotiations";
-import { isPlacedOrder, placeAtAsking } from "../lib/api/orders";
+import { isPlacedOrder, placeAtAsking, placeForAssignment } from "../lib/api/orders";
 import { getProduct, listProducts, selectPricing } from "../lib/api/products";
 import { answerProductQuestion, askProductQuestion, downloadProductDocument, listProductDocuments, listProductQuestions } from "../lib/api/productContent";
 import { useApiQuery } from "../lib/api/useApiQuery";
-import { BENCHMARK_GLYPH, formatDate, formatMoney, formatPercent, movementDirection, titleCase } from "../lib/pricingFormat";
+import { PAYMENT_TERMS, adjustUnitPrice } from "../lib/paymentTerms";
+import { BENCHMARK_GLYPH, formatDate, formatMoney, formatPercent, movementDirection, previewOrderTotal, titleCase } from "../lib/pricingFormat";
 
 function useDebounced<T>(value: T, delayMs: number) {
   const [debounced, setDebounced] = useState(value);
@@ -31,7 +33,7 @@ function useDebounced<T>(value: T, delayMs: number) {
   return debounced;
 }
 
-function EstimateSummary({ benchmark, quantity, averaged }: { benchmark: BenchmarkSummary | null; quantity: number; averaged: boolean }) {
+function EstimateSummary({ benchmark, quantity, averaged, paymentTerms = "" }: { benchmark: BenchmarkSummary | null; quantity: number; averaged: boolean; paymentTerms?: string }) {
   const debouncedQuantity = useDebounced(quantity, 350);
   const valid = Number.isFinite(debouncedQuantity) && debouncedQuantity > 0;
   const estimate = useApiQuery(
@@ -50,13 +52,21 @@ function EstimateSummary({ benchmark, quantity, averaged }: { benchmark: Benchma
     return <div className="cost-summary"><span>{label}</span><strong>—</strong><small className="negative">{getErrorMessage(estimate.error)}</small></div>;
   }
   const data = estimate.data;
+  const adjusted = data?.amount && benchmark.current && paymentTerms
+    ? previewOrderTotal(String(debouncedQuantity), {
+        amount: adjustUnitPrice(benchmark.current.value.amount, paymentTerms),
+        currency: data.amount.currency,
+      })
+    : data?.amount ?? null;
   const note = data?.freshnessState === "stale"
     ? `Informational only · based on a stale benchmark (as of ${formatDate(benchmark.current.freshness.asOfDate)})`
-    : "Informational only · freight and GST not included";
+    : paymentTerms
+      ? "Payment terms applied · freight and GST not included"
+      : "Informational only · freight and GST not included";
   return (
     <div className="cost-summary">
       <span>{label}</span>
-      <strong>{data?.amount ? formatMoney(data.amount, 2) : "…"}</strong>
+      <strong>{adjusted ? formatMoney(adjusted, 2) : "…"}</strong>
       <small>{note}</small>
     </div>
   );
@@ -74,6 +84,9 @@ export function ProductDetailPage() {
   const [priceDirty, setPriceDirty] = useState(false);
   const [busySupplier, setBusySupplier] = useState<string | null>(null);
   const [tradeError, setTradeError] = useState<string | null>(null);
+  const hideSuppliers = readSession()?.user.hideSuppliers === true;
+  const [paymentTerms, setPaymentTerms] = useState("");
+  const [placing, setPlacing] = useState(false);
   const [tab, setTab] = useState<"specifications" | "supply" | "documents" | "questions">("specifications");
   const [question, setQuestion] = useState("");
   const [replies, setReplies] = useState<Record<string, string>>({});
@@ -81,7 +94,7 @@ export function ProductDetailPage() {
   const { data: product, error, isLoading, reload } = useApiQuery(`product:${sku}`, (signal) => getProduct(sku, signal));
   const benchmark = product ? selectPricing(product, { market: searchParams.get("market"), currency: searchParams.get("currency") }) : null;
   const listings = useApiQuery(
-    product ? `listings:${product.productCode}:${benchmark?.currency ?? ""}` : null,
+    product && !hideSuppliers ? `listings:${product.productCode}:${benchmark?.currency ?? ""}` : null,
     (signal) => listProductListings(product?.productCode ?? "", benchmark?.currency, signal),
   );
   const offers = (listings.data ?? []).map((listing) => ({
@@ -100,7 +113,7 @@ export function ProductDetailPage() {
   const debouncedPin = useDebounced(destinationPin, 350);
   const pinOk = /^[1-9][0-9]{5}$/.test(debouncedPin);
   const supplierMatches = useApiQuery(
-    product && pinOk && debouncedQuantity > 0 ? `matches:${product.productCode}:${debouncedQuantity}:${debouncedPin}:${benchmark?.currency ?? ""}` : null,
+    !hideSuppliers && product && pinOk && debouncedQuantity > 0 ? `matches:${product.productCode}:${debouncedQuantity}:${debouncedPin}:${benchmark?.currency ?? ""}` : null,
     (signal) => listSupplierMatches(product?.productCode ?? "", {
       quantity: String(debouncedQuantity),
       uom: product?.uom.code ?? "KG",
@@ -137,35 +150,55 @@ export function ProductDetailPage() {
           <div className="product-detail">
             <section className="product-gallery">
               <div className="product-gallery__main"><ProductVisual glyph={BENCHMARK_GLYPH} dark /><Badge tone={product.availability === "available" ? "positive" : "neutral"}>{product.availability === "available" ? "BENCHMARK LIVE" : "RATE ON REQUEST"}</Badge></div>
-              <div className="thumb-row"><div><ProductVisual glyph={BENCHMARK_GLYPH} /></div><div><ProductVisual glyph={BENCHMARK_GLYPH} /></div><div className="cert-thumb"><ShieldCheck size={24} /><span>{product.listingCount} {product.listingCount === 1 ? "supplier" : "suppliers"}</span></div></div>
+              <div className="thumb-row"><div><ProductVisual glyph={BENCHMARK_GLYPH} /></div><div><ProductVisual glyph={BENCHMARK_GLYPH} /></div><div className="cert-thumb"><ShieldCheck size={24} /><span>{hideSuppliers ? "Plenza" : `${product.listingCount} ${product.listingCount === 1 ? "supplier" : "suppliers"}`}</span></div></div>
             </section>
             <section className="product-info">
-              <div className="eyebrow-row"><Badge>{product.category.toUpperCase()}</Badge><span>ITEM {product.productCode}</span><span>{product.listingCount} {product.listingCount === 1 ? "supplier" : "suppliers"}</span></div>
+              <div className="eyebrow-row"><Badge>{product.category.toUpperCase()}</Badge><span>ITEM {product.productCode}</span>{!hideSuppliers && <span>{product.listingCount} {product.listingCount === 1 ? "supplier" : "suppliers"}</span>}</div>
               <Heading level={1}>{product.name}</Heading>
               <p className="lead">{[product.subcategory, product.description].filter(Boolean).join(" · ")}</p>
               <div className="spec-strip">{(["grade", "mfi", "density"] as const).map((key) => {
                 const field = product.specifications.find((item) => item.key === key);
                 return <span key={key}><small>{field?.label ?? key}</small><strong>{field?.value ?? "Not specified"}</strong></span>;
               })}<span><small>MOQ</small><strong>{moq}</strong></span></div>
-              {matched.length === 0 && offers.length > 0 && <div className="spec-strip">{offers.map((offer) => <span key={offer.id}><small><OrgLink organisationId={offer.organisationId}>{offer.organisation}</OrgLink> · {titleCase(offer.availability ?? "")}</small><strong>Asking {formatMoney({ amount: offer.askingPrice ?? "0", currency: benchmark?.currency ?? "INR" })} · {offer.availability === "limited" && offer.maximumQuantity ? `${Number(offer.minimumQuantity).toLocaleString("en-IN")}–${Number(offer.maximumQuantity).toLocaleString("en-IN")}` : `MOQ ${Number(offer.minimumQuantity).toLocaleString("en-IN")}`}</strong></span>)}</div>}
+              {!hideSuppliers && matched.length === 0 && offers.length > 0 && <div className="spec-strip">{offers.map((offer) => <span key={offer.id}><small><OrgLink organisationId={offer.organisationId}>{offer.organisation}</OrgLink> · {titleCase(offer.availability ?? "")}</small><strong>Asking {formatMoney({ amount: offer.askingPrice ?? "0", currency: benchmark?.currency ?? "INR" })} · {offer.availability === "limited" && offer.maximumQuantity ? `${Number(offer.minimumQuantity).toLocaleString("en-IN")}–${Number(offer.maximumQuantity).toLocaleString("en-IN")}` : `MOQ ${Number(offer.minimumQuantity).toLocaleString("en-IN")}`}</strong></span>)}</div>}
               <div className="procure-box">
                 <div className="quantity-field"><label>Required quantity</label><div><Button variant="ghost" onClick={() => setQuantity(Math.max(500, quantity - 500))}><Minus size={16} /></Button><Input value={quantity} onChange={(e) => setQuantity(Number(e.target.value))} /><span>{product.uom.code}</span><Button variant="ghost" onClick={() => setQuantity(quantity + 500)}><Plus size={16} /></Button></div></div>
                 <div className="delivery-field"><label>Delivery PIN</label><div><MapPin size={17} /><Input value={destinationPin} onChange={(event) => setDestinationPin(event.target.value)} /></div></div>
-                <EstimateSummary benchmark={benchmark} quantity={quantity} averaged={offers.length > 0} />
-                {offers.length > 0 && (
+                <EstimateSummary benchmark={benchmark} quantity={quantity} averaged={offers.length > 0} paymentTerms={hideSuppliers ? paymentTerms : ""} />
+                {hideSuppliers && (
+                  <label className="quantity-field">Payment terms
+                    <select className="field-select" aria-label="Payment terms" value={paymentTerms} onChange={(event) => setPaymentTerms(event.target.value)}>
+                      {PAYMENT_TERMS.map((term) => <option key={term.label} value={term.value}>{term.label}</option>)}
+                    </select>
+                  </label>
+                )}
+                {!hideSuppliers && offers.length > 0 && (
                   <label className="quantity-field">{several ? "Average price" : "Asking price"}
                     <Input inputMode="decimal" aria-label={several ? "Average price" : "Asking price"} value={offerPrice} onChange={(event) => { setPriceDirty(true); setOfferPrice(event.target.value); }} />
                   </label>
                 )}
-                <p className="order-note">{several ? "Leave the average to order at each supplier’s asking price where stock allows. Change it and a supplier above that price is a negotiation." : "Leave the asking price to place the order where stock allows. Change it to negotiate."}</p>
+                <p className="order-note">{hideSuppliers ? "The price is the current average. Freight is added after the order is accepted." : several ? "Leave the average to order at each supplier’s asking price where stock allows. Change it and a supplier above that price is a negotiation." : "Leave the asking price to place the order where stock allows. Change it to negotiate."}</p>
                 {tradeError && <p className="negative">{tradeError}</p>}
-                <Button onClick={() => setCalculatorOpen(true)}>Calculate landed cost <ArrowRight size={17} /></Button>
-                <Button variant="secondary" onClick={() => navigate(`${paths.purchaseRequests}?product=${encodeURIComponent(product.productCode)}&quantity=${encodeURIComponent(String(quantity))}&pin=${encodeURIComponent(destinationPin)}&price=${encodeURIComponent(offerPrice)}`)}>Create purchase request</Button>
+                {hideSuppliers ? (
+                  <Button disabled={placing || !pinOk || !(quantity > 0)} onClick={() => {
+                    setPlacing(true);
+                    setTradeError(null);
+                    placeForAssignment({ productCode: product.productCode, quantity: String(quantity), destinationPin, paymentTerms: paymentTerms || undefined }).then((order) => {
+                      if (isPlacedOrder(order)) navigate(`${paths.orders}?id=${encodeURIComponent(order.id)}`);
+                      else setTradeError("The order was not placed.");
+                    }).catch((cause) => setTradeError(getErrorMessage(cause))).finally(() => setPlacing(false));
+                  }}>Place order</Button>
+                ) : (
+                  <>
+                    <Button onClick={() => setCalculatorOpen(true)}>Calculate landed cost <ArrowRight size={17} /></Button>
+                    <Button variant="secondary" onClick={() => navigate(`${paths.purchaseRequests}?product=${encodeURIComponent(product.productCode)}&quantity=${encodeURIComponent(String(quantity))}&pin=${encodeURIComponent(destinationPin)}&price=${encodeURIComponent(offerPrice)}`)}>Create purchase request</Button>
+                  </>
+                )}
               </div>
-              <div className="assurance-row"><span><ShieldCheck size={18} /><strong>{product.listingCount} {product.listingCount === 1 ? "supplier" : "suppliers"}</strong><small>Active listings</small></span><span><Truck size={18} /><strong>{product.availability === "available" ? "Benchmark live" : "Rate on request"}</strong><small>{benchmark?.current ? `As of ${formatDate(benchmark.current.freshness.asOfDate)}` : "No current benchmark"}</small></span><span><ReceiptText size={18} /><strong>{offers.length ? "Listed" : "No listing"}</strong><small>{offers.length ? `${offers.length} eligible in this currency` : "No supplier is listing this product"}</small></span></div>
+              <div className="assurance-row">{!hideSuppliers && <span><ShieldCheck size={18} /><strong>{product.listingCount} {product.listingCount === 1 ? "supplier" : "suppliers"}</strong><small>Active listings</small></span>}<span><Truck size={18} /><strong>{product.availability === "available" ? "Benchmark live" : "Rate on request"}</strong><small>{benchmark?.current ? `As of ${formatDate(benchmark.current.freshness.asOfDate)}` : "No current benchmark"}</small></span>{hideSuppliers ? <span><ReceiptText size={18} /><strong>Freight later</strong><small>Added after the order is accepted</small></span> : <span><ReceiptText size={18} /><strong>{offers.length ? "Listed" : "No listing"}</strong><small>{offers.length ? `${offers.length} eligible in this currency` : "No supplier is listing this product"}</small></span>}</div>
             </section>
             <div className="product-wide">
-              {matched.length > 0 && <SupplierComparison
+              {!hideSuppliers && matched.length > 0 && <SupplierComparison
                 matches={matched}
                 pin={debouncedPin}
                 quantity={debouncedQuantity}
@@ -234,8 +267,8 @@ export function ProductDetailPage() {
               <Button variant="ghost" className={tab === "questions" ? "is-active" : ""} onClick={() => setTab("questions")}>Q&A</Button>
             </div>
             {tab === "specifications" && <div className="spec-grid">{product.specifications.filter((field) => field.key !== "producer").map((field) => <div key={field.key} className={field.key === "description" ? "spec-grid__wide" : undefined}><small>{field.label}</small><strong>{field.value ?? "Not specified"}</strong></div>)}</div>}
-            {tab === "supply" && (matched.length > 0 ? <div className="spec-grid">{matched.map((match) => <div key={match.supplierUserId}><small><OrgLink organisationId={match.organisationId}>{match.organisation}</OrgLink> · {titleCase(match.availability)}</small><strong>Asking {formatMoney(match.askingPrice)} · {match.availability === "limited" && match.maximumQuantity ? `${Number(match.minimumQuantity).toLocaleString("en-IN")}–${Number(match.maximumQuantity).toLocaleString("en-IN")}` : `MOQ ${Number(match.minimumQuantity).toLocaleString("en-IN")}`} {product.uom.code}</strong><ul className="match-reasons">{match.reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul></div>)}</div> : offers.length > 0 ? <div className="spec-grid">{offers.map((offer) => <div key={offer.id}><small><OrgLink organisationId={offer.organisationId}>{offer.organisation}</OrgLink> · {titleCase(offer.availability ?? "")}</small><strong>Asking {formatMoney({ amount: offer.askingPrice ?? "0", currency: benchmark?.currency ?? "INR" })} · {offer.availability === "limited" && offer.maximumQuantity ? `${Number(offer.minimumQuantity).toLocaleString("en-IN")}–${Number(offer.maximumQuantity).toLocaleString("en-IN")}` : `MOQ ${Number(offer.minimumQuantity).toLocaleString("en-IN")}`} {product.uom.code}</strong></div>)}</div> : <EmptyState title="No active listings" message="No supplier is listing this product." />)}
-            {tab === "supply" && !pinOk && <p className="request-note">Enter a 6-digit delivery PIN to see why each supplier matches, including freight.</p>}
+            {tab === "supply" && (hideSuppliers ? <p className="request-note">The price is the current average. Freight is confirmed after the order is accepted.</p> : matched.length > 0 ? <div className="spec-grid">{matched.map((match) => <div key={match.supplierUserId}><small><OrgLink organisationId={match.organisationId}>{match.organisation}</OrgLink> · {titleCase(match.availability)}</small><strong>Asking {formatMoney(match.askingPrice)} · {match.availability === "limited" && match.maximumQuantity ? `${Number(match.minimumQuantity).toLocaleString("en-IN")}–${Number(match.maximumQuantity).toLocaleString("en-IN")}` : `MOQ ${Number(match.minimumQuantity).toLocaleString("en-IN")}`} {product.uom.code}</strong><ul className="match-reasons">{match.reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul></div>)}</div> : offers.length > 0 ? <div className="spec-grid">{offers.map((offer) => <div key={offer.id}><small><OrgLink organisationId={offer.organisationId}>{offer.organisation}</OrgLink> · {titleCase(offer.availability ?? "")}</small><strong>Asking {formatMoney({ amount: offer.askingPrice ?? "0", currency: benchmark?.currency ?? "INR" })} · {offer.availability === "limited" && offer.maximumQuantity ? `${Number(offer.minimumQuantity).toLocaleString("en-IN")}–${Number(offer.maximumQuantity).toLocaleString("en-IN")}` : `MOQ ${Number(offer.minimumQuantity).toLocaleString("en-IN")}`} {product.uom.code}</strong></div>)}</div> : <EmptyState title="No active listings" message="No supplier is listing this product." />)}
+            {tab === "supply" && !hideSuppliers && !pinOk && <p className="request-note">Enter a 6-digit delivery PIN to see why each supplier matches, including freight.</p>}
             {tab === "documents" && (
               <AsyncContent isLoading={documents.isLoading && !documents.data} error={documents.error} onRetry={documents.reload} isEmpty={!documents.isLoading && !documents.error && (documents.data ?? []).length === 0} emptyTitle="No documents" emptyMessage="No documents are on file for this product." loadingLabel="Loading documents…">
                 <div className="spec-grid">{(documents.data ?? []).map((document) => <div key={document.id}><small>{document.documentType}</small><strong>{document.name}</strong><Button variant="ghost" onClick={() => void downloadProductDocument(product.productCode, document.id, document.filename).catch((cause) => setContentError(getErrorMessage(cause)))}>Download</Button></div>)}</div>

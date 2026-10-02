@@ -27,6 +27,11 @@ class Settings(BaseSettings):
     pricing_volatility_min_points: int = 5
     pricing_negotiation_window_days: int = 30
 
+    # Buyers and suppliers do not see supplier names, negotiations, or other suppliers.
+    # Platform and pricing admins still see every feature. Tests leave this off.
+    # When true, buyers and suppliers do not see other suppliers. Admins still do.
+    hide_suppliers: bool = False
+
     # Signs login tokens. Override outside local development.
     auth_secret: SecretStr = SecretStr("sourceone-dev-auth-secret")
     auth_token_ttl_seconds: int = 60 * 60 * 12

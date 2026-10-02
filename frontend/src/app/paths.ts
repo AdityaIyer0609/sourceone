@@ -17,6 +17,7 @@ export const paths = {
   rateManagement: '/admin/rate-management',
   freightManagement: '/admin/freight',
   users: '/admin/users',
+  assignOrders: '/assign-orders',
   approvals: '/approvals',
   company: '/company',
   profile: '/profile',

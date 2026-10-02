@@ -27,9 +27,9 @@ export interface Order {
   freightStatus: 'estimated' | 'on_request' | null
   freight: Money | null
   freightMatch: 'lane' | 'zone' | 'default' | 'distance' | null
-  negotiation: { id: string; negotiationNumber: string; acceptedVersionNumber: number }
+  negotiation: { id: string; negotiationNumber: string; acceptedVersionNumber: number } | null
   buyer: { name: string; organisation: string; organisationId: string }
-  supplier: { name: string; organisation: string; organisationId: string }
+  supplier: { name: string; organisation: string; organisationId: string } | null
   viewerRole: 'buyer' | 'supplier'
   allowedActions: { cancel: boolean }
   createdAt: string
@@ -171,10 +171,10 @@ export interface ReorderItem {
   orderStatus: OrderStatus
   productCode: string
   productName: string
-  supplierUserId: string
-  supplierName: string
-  organisation: string
-  organisationId: string
+  supplierUserId: string | null
+  supplierName: string | null
+  organisation: string | null
+  organisationId: string | null
   quantity: string
   uom: string
   currency: string
@@ -204,3 +204,25 @@ export const listReorders = (signal?: AbortSignal) => apiClient.get<ReorderItem[
 
 export const startReorder = (orderId: string, body: { quantity: string; destinationPin?: string }) =>
   apiClient.post<ReorderResult>(`${BASE}/${orderId}/reorder`, body)
+
+export const placeForAssignment = (body: { productCode: string; quantity: string; destinationPin: string; paymentTerms?: string }) =>
+  apiClient.post<Order>(`${BASE}/for-assignment`, body)
+
+export interface UnassignedOrder {
+  id: string
+  orderNumber: string
+  productCode: string
+  productName: string
+  quantity: string
+  uom: string
+  currency: string
+  unitPrice: string
+  buyerOrganisation: string
+  destinationPin: string | null
+  createdAt: string
+}
+
+export const listUnassignedOrders = (signal?: AbortSignal) => apiClient.get<UnassignedOrder[]>(`${BASE}/unassigned`, { signal })
+
+export const assignOrder = (orderId: string, supplierUserId: string) =>
+  apiClient.post<UnassignedOrder>(`${BASE}/${orderId}/assign`, { supplierUserId })

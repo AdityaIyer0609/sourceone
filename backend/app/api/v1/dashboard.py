@@ -77,15 +77,17 @@ def _slice(row: dict) -> SpendSliceOut:
 
 @router.get("/dashboard", response_model=DashboardOut)
 def get_dashboard(db: DbSession, actor: Buyer):
+    from app.identity.privacy import suppliers_hidden
     data = buyer_dashboard(db, actor)
+    hidden = suppliers_hidden(actor)
     return DashboardOut(
         active_orders=data["active_orders"],
-        open_negotiations=data["open_negotiations"],
-        open_requests=data["open_requests"],
+        open_negotiations=0 if hidden else data["open_negotiations"],
+        open_requests=0 if hidden else data["open_requests"],
         pending_actions=data["pending_actions"],
         spend=[SpendOut(currency=row["currency"], amount=f"{row['amount']:.2f}") for row in data["spend"]],
         spend_by_product=[_slice(row) for row in data["spend_by_product"]],
-        spend_by_supplier=[_slice(row) for row in data["spend_by_supplier"]],
+        spend_by_supplier=[] if hidden else [_slice(row) for row in data["spend_by_supplier"]],
         variance=[
             VarianceOut(
                 order_id=row["order_id"],
@@ -99,7 +101,7 @@ def get_dashboard(db: DbSession, actor: Buyer):
             for row in data["variance"]
         ],
         delivery=DeliveryOut(**data["delivery"]),
-        suppliers=[
+        suppliers=[] if hidden else [
             SupplierPanelOut(
                 organisation_id=row["organisation_id"],
                 organisation=row["organisation"],
@@ -112,8 +114,11 @@ def get_dashboard(db: DbSession, actor: Buyer):
         ],
         alerts=[AlertOut(**row) for row in data["alerts"]],
         orders_by_status=data["orders_by_status"],
-        recent_orders=[_activity(row) for row in data["recent_orders"]],
-        recent_negotiations=[_activity(row) for row in data["recent_negotiations"]],
+        recent_orders=[
+            _activity({**row, "counterparty": "" if hidden else row["counterparty"]})
+            for row in data["recent_orders"]
+        ],
+        recent_negotiations=[] if hidden else [_activity(row) for row in data["recent_negotiations"]],
     )
 
 
@@ -125,15 +130,17 @@ def _rate(row: dict) -> CountRateOut:
 
 @router.get("/supplier-dashboard", response_model=SupplierDashboardOut)
 def get_supplier_dashboard(db: DbSession, actor: SupplierActor):
+    from app.identity.privacy import suppliers_hidden
     data = supplier_dashboard(db, actor)
     rates = data["performance"]
+    hidden = suppliers_hidden(actor)
     return SupplierDashboardOut(
-        open_requests=data["open_requests"],
-        open_negotiations=data["open_negotiations"],
+        open_requests=0 if hidden else data["open_requests"],
+        open_negotiations=0 if hidden else data["open_negotiations"],
         orders_to_confirm=data["orders_to_confirm"],
         listings_to_review=data["listings_to_review"],
-        requests=[SupplierWorkOut(**row) for row in data["requests"]],
-        negotiations=[SupplierWorkOut(**row) for row in data["negotiations"]],
+        requests=[] if hidden else [SupplierWorkOut(**row) for row in data["requests"]],
+        negotiations=[] if hidden else [SupplierWorkOut(**row) for row in data["negotiations"]],
         orders=[SupplierWorkOut(**row) for row in data["orders"]],
         listings=[
             SupplierListingNoteOut(

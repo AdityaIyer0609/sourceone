@@ -44,6 +44,7 @@ export const router = createBrowserRouter([
           { path: 'admin/freight', element: <OperationsPage screen="Freight Management" />, handle: title('Freight') },
           { path: 'admin/users', element: <OperationsPage screen="User Management" />, handle: title('User Management') },
           { path: 'approvals', element: <OperationsPage screen="Approvals" />, handle: title('Approvals') },
+          { path: 'assign-orders', element: <OperationsPage screen="Assign orders" />, handle: title('Assign orders') },
           { path: 'company', element: <OperationsPage screen="Company" />, handle: title('Company') },
           { path: 'profile', element: <ProfilePage />, handle: title('Profile') },
           { path: '*', element: <NotFoundPage />, handle: title('Not Found') },

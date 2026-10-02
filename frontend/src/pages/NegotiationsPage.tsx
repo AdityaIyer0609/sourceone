@@ -182,8 +182,8 @@ export function NegotiationsPage() {
   const { data: negotiations = [], error, isLoading, reload } = useApiQuery(allowed ? "negotiations" : null, (signal) => listNegotiations(signal));
   const selected = negotiations.find((item) => item.id === searchParams.get("id")) ?? negotiations[0] ?? null;
   const orders = useApiQuery(allowed ? "orders" : null, (signal) => listOrders(signal));
-  if (!allowed) return <Navigate to={paths.marketplace} replace />;
-  const order = orders.data?.find((item) => item.negotiation.id === selected?.id) ?? null;
+  if (!allowed || readSession()?.user.hideSuppliers) return <Navigate to={paths.marketplace} replace />;
+  const order = orders.data?.find((item) => item.negotiation?.id === selected?.id) ?? null;
   const listed = [...negotiations].sort((left, right) => Number(needsReply(right.status)) - Number(needsReply(left.status)) || right.updatedAt.localeCompare(left.updatedAt));
   return (
     <div className="page">

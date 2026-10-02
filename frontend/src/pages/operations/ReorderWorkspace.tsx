@@ -6,10 +6,11 @@ import { paths } from "../../app/paths";
 import { AsyncContent } from "../../components/feedback/AsyncContent";
 import { OrgLink } from "../../components/supplier/OrgLink";
 import { Badge, Button, Input, Modal } from "../../components/ui";
+import { readSession } from "../../lib/api/auth";
 import { getErrorMessage } from "../../lib/api/client";
 import { readDeliveryPin } from "../../lib/deliveryPin";
 import { estimateFreight, shownFreight, type FreightBasis, type FreightEstimate } from "../../lib/api/freight";
-import { listReorders, startReorder, type ReorderItem } from "../../lib/api/orders";
+import { isPlacedOrder, listReorders, placeForAssignment, startReorder, type ReorderItem } from "../../lib/api/orders";
 import { useApiQuery } from "../../lib/api/useApiQuery";
 import { formatDate, formatMoney, titleCase } from "../../lib/pricingFormat";
 
@@ -31,12 +32,13 @@ function ReorderModal({ item, onClose }: { item: ReorderItem; onClose: () => voi
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [basis, setBasis] = useState<FreightBasis>("standard");
+  const hidden = readSession()?.user.hideSuppliers === true;
   const pinOk = /^[1-9][0-9]{5}$/.test(pin);
   const quantityOk = Number(quantity) > 0;
   const estimate = useApiQuery(
-    item.available && pinOk && quantityOk ? `reorder-freight:${item.orderId}:${pin}:${quantity}` : null,
+    !hidden && item.available && item.supplierUserId && pinOk && quantityOk ? `reorder-freight:${item.orderId}:${pin}:${quantity}` : null,
     (signal) => estimateFreight({
-      supplierUserId: item.supplierUserId,
+      supplierUserId: item.supplierUserId ?? "",
       productCode: item.productCode,
       quantity,
       destinationPin: pin,
@@ -54,11 +56,17 @@ function ReorderModal({ item, onClose }: { item: ReorderItem; onClose: () => voi
     setBusy(true);
     setError(null);
     try {
-      const created = await startReorder(item.orderId, {
-        quantity,
-        ...(pinOk ? { destinationPin: pin } : {}),
-      });
-      navigate(`${paths.negotiations}?id=${encodeURIComponent(created.negotiationId)}`);
+      if (hidden) {
+        const order = await placeForAssignment({ productCode: item.productCode, quantity, destinationPin: pin });
+        if (isPlacedOrder(order)) navigate(`${paths.orders}?id=${encodeURIComponent(order.id)}`);
+        else setError("The order was not placed.");
+      } else {
+        const created = await startReorder(item.orderId, {
+          quantity,
+          ...(pinOk ? { destinationPin: pin } : {}),
+        });
+        navigate(`${paths.negotiations}?id=${encodeURIComponent(created.negotiationId)}`);
+      }
     } catch (cause) {
       setError(getErrorMessage(cause));
       setBusy(false);
@@ -68,7 +76,7 @@ function ReorderModal({ item, onClose }: { item: ReorderItem; onClose: () => voi
     <Modal open title={`Reorder ${item.orderNumber}`} onClose={onClose}>
       <div className="modal-cost">
         <span><small>Product</small><strong>{item.productName}</strong></span>
-        <span><small>Supplier</small><strong><OrgLink organisationId={item.organisationId}>{item.organisation}</OrgLink> · {item.supplierName}</strong></span>
+        {item.organisationId && <span><small>Supplier</small><strong><OrgLink organisationId={item.organisationId}>{item.organisation}</OrgLink> · {item.supplierName}</strong></span>}
         <span><small>Previous final price</small><strong>{formatMoney(item.previousPrice, 4)} / {item.uom.toLowerCase()}</strong></span>
         <span><small>Current asking price</small><strong>{item.currentAskingPrice ? `${formatMoney(item.currentAskingPrice, 4)} / ${item.uom.toLowerCase()}` : "—"}</strong></span>
         <span><small>Plenza benchmark</small><strong>{item.currentBenchmark ? formatMoney(item.currentBenchmark, 4) : "Rate on request"}</strong></span>
@@ -84,11 +92,11 @@ function ReorderModal({ item, onClose }: { item: ReorderItem; onClose: () => voi
         <label>Quantity<div className="input-combo"><Input value={quantity} onChange={(event) => setQuantity(event.target.value)} /><span>{item.uom}</span></div></label>
         <label>Delivery PIN<Input value={pin} placeholder="Change destination" onChange={(event) => setPin(event.target.value)} /></label>
       </div>
-      <p><small>The new negotiation opens at the current asking price. The previous order price is not reused, and freight stays an estimate.</small></p>
+      <p><small>{hidden ? "A new order is placed at the current average. Freight is added after it is accepted." : "The new negotiation opens at the current asking price. The previous order price is not reused, and freight stays an estimate."}</small></p>
       {error && <p className="negative">{error}</p>}
       <div className="modal-actions">
         <Button variant="secondary" onClick={onClose}>Close</Button>
-        <Button disabled={!item.available || !quantityOk || busy || (pin.length > 0 && !pinOk)} onClick={() => void submit()}>{busy ? "Starting…" : "Reorder"}</Button>
+        <Button disabled={!item.available || !quantityOk || busy || (hidden ? !pinOk : pin.length > 0 && !pinOk)} onClick={() => void submit()}>{busy ? "Starting…" : hidden ? "Place order" : "Reorder"}</Button>
       </div>
     </Modal>
   );
@@ -125,7 +133,7 @@ export function ReorderWorkspace() {
           <div className="market-table-wrap"><table className="market-table"><thead><tr><th>Order</th><th>Product / supplier</th><th>Previous quantity</th><th>Previous price</th><th>Availability</th><th>Order date</th><th/></tr></thead><tbody>{rows.map((item) => (
             <tr key={item.orderId}>
               <td><strong>{item.orderNumber}</strong><small>{titleCase(item.orderStatus)}</small></td>
-              <td><strong>{item.productName}</strong><small><OrgLink organisationId={item.organisationId}>{item.organisation}</OrgLink> · {item.supplierName}</small></td>
+              <td><strong>{item.productName}</strong>{item.organisationId && <small><OrgLink organisationId={item.organisationId}>{item.organisation}</OrgLink> · {item.supplierName}</small>}</td>
               <td>{quantityText(item.quantity, item.uom)}</td>
               <td><strong>{formatMoney(item.previousPrice, 4)}</strong><small>{item.currency} · previous final price</small></td>
               <td>{item.available ? <Badge tone="positive">AVAILABLE</Badge> : <Badge tone={item.unavailableReason === "cancelled" ? "negative" : "warning"}>{item.unavailableReason === "cancelled" ? "CANCELLED" : "UNAVAILABLE"}</Badge>}<small>{item.unavailableReason ? BLOCK_LABEL[item.unavailableReason] : "Current listing"}</small></td>

@@ -6,9 +6,15 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, File, Form, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 
-from app.api.deps import DbSession, require_any
+from sqlalchemy import select
+from sqlalchemy.orm import selectinload
+
+from app.api.deps import CurrentActor, DbSession, require_any
+from app.core.errors import PermissionDenied
 from app.api.v1.negotiations import party_out, quantity_text
+from app.identity.privacy import suppliers_hidden
 from app.identity.service import Actor
+from app.models.identity import User
 from app.models.order import Order
 from app.orders import documents, reorder, service
 from app.schemas.negotiation import RequirementOut
@@ -17,7 +23,10 @@ from app.schemas.order import (
     AgreedPriceOut,
     CancelOrderIn,
     CreateOrderIn,
+    AssignSupplierIn,
     PlaceAtAskingIn,
+    PlaceForAssignmentIn,
+    UnassignedOrderOut,
     NegotiationRefOut,
     OrderActionsOut,
     DocumentReviewIn,
@@ -52,6 +61,24 @@ STATUS_LABELS = {
     "delivered": "Delivered",
     "cancelled": "Cancelled",
 }
+
+
+def _visible_supplier(actor: Actor, order: Order):
+    if order.supplier is None:
+        return None
+    if suppliers_hidden(actor) and service.role_of(actor, order) != "supplier":
+        return None
+    return party_out(order.supplier)
+
+
+def _visible_negotiation(actor: Actor, order: Order):
+    if order.negotiation is None or order.negotiation_version is None or suppliers_hidden(actor):
+        return None
+    return NegotiationRefOut(
+        id=order.negotiation_id,
+        negotiation_number=order.negotiation.negotiation_number,
+        accepted_version_number=order.negotiation_version.version_number,
+    )
 
 
 def _shipment(order: Order) -> ShipmentOut:
@@ -95,8 +122,8 @@ def _tracking(actor: Actor, order: Order) -> TrackingOut:
         quantity=quantity_text(order.quantity),
         uom=order.uom,
         buyer=party_out(order.buyer),
-        supplier=party_out(order.supplier),
-        viewer_role=service.role_of(actor, order),
+        supplier=_visible_supplier(actor, order),
+        viewer_role=service.role_of(actor, order) or "buyer",
         next_status=service.next_status(order) if can_progress else None,
         can_progress=can_progress,
         steps=steps,
@@ -110,7 +137,7 @@ def _tracking(actor: Actor, order: Order) -> TrackingOut:
         ],
         last_updated_at=events[-1].created_at if events else order.updated_at,
         shipment=_shipment(order),
-        required_by=order.negotiation.required_by,
+        required_by=order.negotiation.required_by if order.negotiation is not None else None,
         delayed=service.is_delayed(order),
         pod=_pod(order),
     )
@@ -149,13 +176,9 @@ def _present(actor: Actor, order: Order) -> OrderOut:
         freight_status=order.freight_status,
         freight=Money(amount=f"{order.freight_amount:.4f}", currency=order.currency) if order.freight_amount is not None else None,
         freight_match=order.freight_match,
-        negotiation=NegotiationRefOut(
-            id=order.negotiation_id,
-            negotiation_number=order.negotiation.negotiation_number,
-            accepted_version_number=order.negotiation_version.version_number,
-        ),
+        negotiation=_visible_negotiation(actor, order),
         buyer=party_out(order.buyer),
-        supplier=party_out(order.supplier),
+        supplier=_visible_supplier(actor, order),
         viewer_role=service.role_of(actor, order),
         allowed_actions=OrderActionsOut(**service.allowed_actions(actor, order)),
         created_at=order.created_at,
@@ -194,6 +217,54 @@ def create_from_negotiation(negotiation_id: uuid.UUID, body: CreateOrderIn, db: 
     return JSONResponse(status_code=201, content=presented.model_dump(mode="json", by_alias=True))
 
 
+@router.post("/for-assignment", response_model=None, status_code=201)
+def place_for_assignment(body: PlaceForAssignmentIn, db: DbSession, actor: Participant):
+    order = service.place_for_assignment(
+        db, actor, product_code=body.product_code, quantity=body.quantity, destination_pin=body.destination_pin,
+        freight_basis=body.freight_basis, payment_terms=body.payment_terms,
+    )
+    db.commit()
+    presented = _present(actor, service.get_order(db, actor, order.id))
+    return JSONResponse(status_code=201, content=presented.model_dump(mode="json", by_alias=True))
+
+
+@router.get("/unassigned", response_model=list[UnassignedOrderOut])
+def list_unassigned(db: DbSession, actor: CurrentActor):
+    from app.identity.constants import IdentityPermission
+    from app.pricing.constants import PricingPermission
+    if not (actor.has(IdentityPermission.MANAGE) or actor.has(PricingPermission.CONFIGURE) or actor.has(PricingPermission.PUBLISH)):
+        raise PermissionDenied("Only an admin can assign a supplier")
+    rows = db.scalars(
+        select(Order).where(Order.supplier_user_id.is_(None)).options(
+            selectinload(Order.product), selectinload(Order.buyer).selectinload(User.organisation),
+        ).order_by(Order.created_at.desc())
+    ).all()
+    return [
+        UnassignedOrderOut(
+            id=order.id, order_number=order.order_number, product_code=order.product.product_code,
+            product_name=order.product.name, quantity=quantity_text(order.quantity), uom=order.uom,
+            currency=order.currency, unit_price=f"{order.agreed_unit_price:.4f}",
+            buyer_organisation=order.buyer.organisation.name, destination_pin=order.destination_pin,
+            created_at=order.created_at,
+        )
+        for order in rows
+    ]
+
+
+@router.post("/{order_id}/assign", response_model=UnassignedOrderOut)
+def assign_supplier(order_id: uuid.UUID, body: AssignSupplierIn, db: DbSession, actor: CurrentActor):
+    order = service.assign_supplier(db, actor, order_id, body.supplier_user_id)
+    db.commit()
+    db.refresh(order)
+    return UnassignedOrderOut(
+        id=order.id, order_number=order.order_number, product_code=order.product.product_code,
+        product_name=order.product.name, quantity=quantity_text(order.quantity), uom=order.uom,
+        currency=order.currency, unit_price=f"{order.agreed_unit_price:.4f}",
+        buyer_organisation=order.buyer.organisation.name, destination_pin=order.destination_pin,
+        created_at=order.created_at,
+    )
+
+
 @router.get("", response_model=list[OrderOut])
 def list_orders(db: DbSession, actor: Participant, status: OrderStatus | None = None):
     return [_present(actor, o) for o in service.list_orders(db, actor, status=status)]
@@ -203,19 +274,20 @@ def _money(amount, currency: str) -> Money:
     return Money(amount=f"{amount:.4f}", currency=currency)
 
 
-def _reorder_item(item: dict) -> ReorderItemOut:
+def _reorder_item(actor: Actor, item: dict) -> ReorderItemOut:
     order = item["order"]
     listing = item["listing"]
+    hidden = order.supplier is None or suppliers_hidden(actor)
     return ReorderItemOut(
         order_id=order.id,
         order_number=order.order_number,
         order_status=order.status,
         product_code=order.product.product_code,
         product_name=order.product.name,
-        supplier_user_id=order.supplier_user_id,
-        supplier_name=order.supplier.full_name,
-        organisation=order.supplier.organisation.name,
-        organisation_id=order.supplier.organisation_id,
+        supplier_user_id=None if hidden else order.supplier_user_id,
+        supplier_name=None if hidden else order.supplier.full_name,
+        organisation=None if hidden else order.supplier.organisation.name,
+        organisation_id=None if hidden else order.supplier.organisation_id,
         quantity=quantity_text(order.quantity),
         uom=order.uom,
         currency=order.currency,
@@ -230,7 +302,7 @@ def _reorder_item(item: dict) -> ReorderItemOut:
 
 @router.get("/reorder", response_model=list[ReorderItemOut])
 def list_reorders(db: DbSession, actor: Participant):
-    return [_reorder_item(item) for item in reorder.list_reorderable(db, actor)]
+    return [_reorder_item(actor, item) for item in reorder.list_reorderable(db, actor)]
 
 
 @router.post("/{order_id}/reorder", response_model=ReorderOut, status_code=201)

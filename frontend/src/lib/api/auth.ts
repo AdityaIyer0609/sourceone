@@ -5,6 +5,7 @@ export interface SessionUser {
   fullName: string
   organisation: string
   roles: string[]
+  hideSuppliers?: boolean
 }
 
 export interface Session {
@@ -48,3 +49,5 @@ export function authHeaders(): Record<string, string> {
 
 export const login = (email: string, password: string) =>
   apiClient.post<{ accessToken: string; tokenType: string; expiresIn: number; user: SessionUser }>('/auth/login', { email, password })
+
+export const currentUser = (signal?: AbortSignal) => apiClient.get<SessionUser>('/auth/me', { signal })
