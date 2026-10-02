@@ -3,7 +3,6 @@ import { ApiError, getErrorMessage } from "../../lib/api/client";
 import { readDeliveryPin } from "../../lib/deliveryPin";
 import { estimateFreight, shownFreight, type FreightBasis, type FreightEstimate } from "../../lib/api/freight";
 import type { Negotiation } from "../../lib/api/negotiations";
-import { getCompany, type OrderApproval } from "../../lib/api/approvals";
 import { createOrderFromNegotiation, isPlacedOrder, type Order } from "../../lib/api/orders";
 import { BENCHMARK_GLYPH, formatMoney, GST_RATE_PERCENT, orderCharges, previewOrderTotal, titleCase } from "../../lib/pricingFormat";
 import { ProductVisual } from "../product/ProductVisual";
@@ -17,8 +16,6 @@ export function CreateOrderModal({ negotiation, onClose, onCreated, onViewOrder 
   onViewOrder: (order: Order) => void;
 }) {
   const [order, setOrder] = useState<Order | null>(null);
-  const [submitted, setSubmitted] = useState<OrderApproval | null>(null);
-  const [needsApproval, setNeedsApproval] = useState(false);
   const [pin, setPin] = useState(negotiation.destinationPin || readDeliveryPin());
   const [basis, setBasis] = useState<FreightBasis>(negotiation.freightBasis ?? "standard");
   const [estimate, setEstimate] = useState<FreightEstimate | null>(null);
@@ -27,19 +24,6 @@ export function CreateOrderModal({ negotiation, onClose, onCreated, onViewOrder 
   const [error, setError] = useState<unknown>(null);
   const negotiated = negotiation.negotiated;
   const pinOk = /^[1-9][0-9]{5}$/.test(pin);
-  useEffect(() => {
-    if (!negotiated) return;
-    let cancelled = false;
-    const material = previewOrderTotal(negotiated.quantity, negotiated.price);
-    getCompany().then((company) => {
-      const threshold = company.threshold;
-      const over = !!threshold && threshold.currency === material.currency && Number(material.amount) > Number(threshold.amount);
-      if (!cancelled) setNeedsApproval(over);
-    }).catch(() => {
-      if (!cancelled) setNeedsApproval(false);
-    });
-    return () => { cancelled = true; };
-  }, [negotiated]);
   useEffect(() => {
     if (!negotiated || !pinOk) {
       setEstimate(null);
@@ -84,7 +68,7 @@ export function CreateOrderModal({ negotiation, onClose, onCreated, onViewOrder 
         setOrder(created);
         onCreated(created);
       } else {
-        setSubmitted(created);
+        setError(new Error("The order was not placed."));
       }
     } catch (caught) {
       setError(caught);
@@ -94,7 +78,7 @@ export function CreateOrderModal({ negotiation, onClose, onCreated, onViewOrder 
   };
 
   return (
-    <Modal open title={submitted ? "Submitted for approval" : order ? "Order placed" : needsApproval ? "Submit for approval" : "Create order"} onClose={onClose}>
+    <Modal open title={order ? "Order placed" : "Create order"} onClose={onClose}>
       <div className="modal-product"><ProductVisual glyph={BENCHMARK_GLYPH} /><div><strong>{negotiation.product.name}</strong><small>{negotiation.negotiationNumber} · accepted offer V{negotiated.versionNumber} · {negotiation.supplier.organisation}</small></div></div>
       <div className="modal-cost">
         {order && <span><small>Order number</small><strong>{order.orderNumber} · {titleCase(order.status)}</strong></span>}
@@ -127,11 +111,11 @@ export function CreateOrderModal({ negotiation, onClose, onCreated, onViewOrder 
           <strong>{formatMoney(charges.payable)}</strong>
         </div>
       </div>
-      <p className="order-note">{submitted ? `Waiting for someone else in the company. The material total is ${formatMoney(submitted.amount, 2)}, above the ${formatMoney(submitted.threshold, 2)} threshold. No order exists yet.` : `Amount payable adds the estimated freight, when it is known, and ${GST_RATE_PERCENT}% GST. The negotiated price stays the material rate. Approval, when required, uses the material total.`}</p>
+      <p className="order-note">{`Amount payable adds the estimated freight, when it is known, and ${GST_RATE_PERCENT}% GST. The negotiated price stays the material rate.`}</p>
       {error ? <p className="negative" role="alert">{getErrorMessage(error)}{error instanceof ApiError && error.code ? ` (${error.code})` : ""}</p> : null}
       <div className="modal-actions">
         <Button variant="secondary" onClick={onClose}>Close</Button>
-        {order ? <Button onClick={() => onViewOrder(order)}>View order</Button> : submitted ? null : <Button disabled={busy || !pinOk} onClick={place}>{needsApproval ? "Submit for approval" : "Place order"}</Button>}
+        {order ? <Button onClick={() => onViewOrder(order)}>View order</Button> : <Button disabled={busy || !pinOk} onClick={place}>Place order</Button>}
       </div>
     </Modal>
   );

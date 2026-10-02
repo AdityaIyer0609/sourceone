@@ -35,6 +35,6 @@ export const operationsConfigs: Record<OperationsScreen, OperationsConfig> = {
   'Rate Management': { kicker: 'COMMERCIAL ADMIN', title: 'Rate management', description: 'Publish benchmarks, review submissions and maintain rate integrity.' },
   'Freight Management': { kicker: 'COMMERCIAL ADMIN', title: 'Freight rules', description: 'Plenza freight lanes used only to estimate landed cost.' },
   'User Management': { kicker: 'ADMINISTRATION', title: 'User management', description: 'Create Plenza accounts and assign a role. Only a platform admin can do this.' },
-  Approvals: { kicker: 'COMPANY', title: 'Approvals', description: 'Orders above the company material threshold wait here. Approving places the order. Declining leaves the negotiation accepted.' },
+  Approvals: { kicker: 'COMPANY', title: 'Approvals', description: 'New orders are placed directly at any material total. This list is only for requests that were already waiting.' },
   Company: { kicker: 'COMPANY', title: 'Company', description: 'People in this company, and the material total that needs a second person before an order is placed.' },
 }

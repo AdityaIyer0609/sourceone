@@ -62,6 +62,8 @@ export interface Negotiation {
   requirements: { key: string; label: string; value: string }[]
   requirementResponses: { key: string; status: 'met' | 'not_met'; comment: string | null }[]
   supplyNote: string | null
+  availableQuantity: string | null
+  soldOut: boolean
   deliveryNote: string | null
 }
 

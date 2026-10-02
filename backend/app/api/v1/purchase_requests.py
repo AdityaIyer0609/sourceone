@@ -22,7 +22,9 @@ from app.purchase_requests.constants import RequestStatus
 from app.pricing.charges import display_charges
 from app.schemas.negotiation import RequirementResponseOut
 from app.schemas.pricing import ChargeOut, Money
-from app.schemas.purchase_request import PurchaseRequestIn, PurchaseRequestOut, RequestSupplierOut, RequirementOut, SuppliersIn
+from app.schemas.purchase_request import (
+    PurchaseRequestIn, PurchaseRequestOut, RequestSupplierOut, RequirementOut, SendSupplierIn, SuppliersIn,
+)
 
 router = APIRouter(prefix="/purchase-requests", tags=["purchase-requests"])
 
@@ -46,14 +48,11 @@ def _value(amount: Decimal, currency: str) -> Money:
     return Money(amount=f"{rounded:.4f}", currency=currency)
 
 
-def _supply_note(db: DbSession, request: PurchaseRequest, supplier_user_id: uuid.UUID) -> str | None:
-    listing = db.scalar(select(SupplierListing).where(
+def _listing(db: DbSession, request: PurchaseRequest, supplier_user_id: uuid.UUID) -> SupplierListing | None:
+    return db.scalar(select(SupplierListing).where(
         SupplierListing.supplier_user_id == supplier_user_id,
         SupplierListing.product_id == request.product_id,
     ))
-    if listing is None:
-        return None
-    return supply_note(listing, request.quantity)
 
 
 def _present(actor: Actor, request: PurchaseRequest, db: DbSession) -> PurchaseRequestOut:
@@ -107,7 +106,11 @@ def _present(actor: Actor, request: PurchaseRequest, db: DbSession) -> PurchaseR
                 RequirementResponseOut(key=answer.requirement_key, status=answer.status, comment=answer.comment)
                 for answer in (negotiations.requirement_answers(db, negotiation.id) if negotiation is not None else [])
             ],
-            supply_note=_supply_note(db, request, row.supplier_user_id),
+            supply_note=supply_note(listing, request.quantity) if (listing := _listing(db, request, row.supplier_user_id)) else None,
+            availability=listing.availability if listing else None,
+            minimum_quantity=quantity_text(listing.minimum_quantity) if listing else None,
+            maximum_quantity=quantity_text(listing.maximum_quantity) if listing and listing.maximum_quantity is not None else None,
+            sold_out=bool(listing and listing.sold_out),
         ))
     return PurchaseRequestOut(
         id=request.id,
@@ -174,6 +177,20 @@ def send_request(request_id: uuid.UUID, db: DbSession, actor: Participant):
 @router.post("/{request_id}/cancel", response_model=PurchaseRequestOut)
 def cancel_request(request_id: uuid.UUID, db: DbSession, actor: Participant):
     request = service.cancel_request(db, actor, request_id)
+    db.commit()
+    return _present(actor, request, db)
+
+
+@router.post("/{request_id}/suppliers/{supplier_user_id}/send", response_model=PurchaseRequestOut)
+def send_supplier(request_id: uuid.UUID, supplier_user_id: uuid.UUID, body: SendSupplierIn, db: DbSession, actor: Participant):
+    request = service.send_supplier(db, actor, request_id, supplier_user_id, offered_price=body.offered_price)
+    db.commit()
+    return _present(actor, request, db)
+
+
+@router.post("/{request_id}/suppliers/{supplier_user_id}/order", response_model=PurchaseRequestOut)
+def place_supplier(request_id: uuid.UUID, supplier_user_id: uuid.UUID, db: DbSession, actor: Participant):
+    request = service.place_supplier(db, actor, request_id, supplier_user_id)
     db.commit()
     return _present(actor, request, db)
 

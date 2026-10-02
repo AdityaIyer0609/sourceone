@@ -1,12 +1,13 @@
-export type TradeAction = "place" | "negotiate" | "ask";
+export type TradeAction = "place" | "negotiate" | "ask" | "sold_out";
 
 export function tradeDecision(
-  match: { askingPrice: { amount: string }; availability: string; minimumQuantity: string; maximumQuantity: string | null },
+  match: { askingPrice: { amount: string }; availability: string; minimumQuantity: string; maximumQuantity: string | null; soldOut?: boolean },
   quantity: number,
   buyerPrice: string,
   baseline: string,
   several: boolean,
 ): { action: TradeAction; unit: string } {
+  if (match.soldOut) return { action: "sold_out", unit: "" };
   const asking = Number(match.askingPrice.amount);
   const buyer = Number(buyerPrice);
   const untouched = buyerPrice.trim() !== "" && Number.isFinite(buyer) && Math.abs(buyer - Number(baseline)) < 0.00005;

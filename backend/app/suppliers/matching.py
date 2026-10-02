@@ -165,6 +165,7 @@ def match_suppliers(
             "maximum_quantity": _quantity_text(listing.maximum_quantity) if listing.maximum_quantity is not None else None,
             "uom": listing.uom,
             "availability": listing.availability,
+            "sold_out": listing.sold_out,
             "origin_pin": origin,
             "origin_label": quote["origin_label"],
             "meets_minimum": meets,

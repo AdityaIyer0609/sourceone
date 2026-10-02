@@ -21,6 +21,7 @@ from app.models.order import Order
 from app.models.purchase_request import PurchaseRequest, PurchaseRequestSupplier
 from app.negotiation import service as negotiations
 from app.negotiation.constants import NegotiationPermission, NegotiationStatus
+from app.pricing.payment_terms import adjust_unit_price
 from app.purchase_requests.constants import NUMBER_SEQUENCE, RequestStatus
 
 OPEN_FOR_CANCEL = (RequestStatus.DRAFT, RequestStatus.SENT, RequestStatus.IN_NEGOTIATION)
@@ -63,7 +64,13 @@ def sync_status(session: Session, request: PurchaseRequest) -> PurchaseRequest:
     if request.status == RequestStatus.CANCELLED:
         return request
     negotiation_ids = [row.negotiation_id for row in request.suppliers if row.negotiation_id]
-    converted = bool(negotiation_ids) and session.scalar(
+    still_open = any(
+        row.negotiation is None or row.negotiation.status in (
+            NegotiationStatus.DRAFT, NegotiationStatus.OPEN, NegotiationStatus.COUNTERED,
+        )
+        for row in request.suppliers
+    )
+    converted = bool(negotiation_ids) and not still_open and session.scalar(
         select(Order.id).where(Order.negotiation_id.in_(negotiation_ids))
     ) is not None
     if converted:
@@ -85,8 +92,7 @@ def mark_converted(session: Session, negotiation_id: uuid.UUID) -> None:
         .options(selectinload(PurchaseRequestSupplier.request))
     )
     if row is not None and row.request.status != RequestStatus.CANCELLED:
-        row.request.status = RequestStatus.CONVERTED
-        session.flush()
+        sync_status(session, row.request)
 
 
 def get_request(session: Session, actor: Actor, request_id: uuid.UUID) -> PurchaseRequest:
@@ -206,35 +212,96 @@ def send_request(session: Session, actor: Actor, request_id: uuid.UUID) -> Purch
         raise InvalidStateTransition("Only a draft purchase request can be sent", details={"status": request.status})
     if not request.suppliers:
         raise ValidationFailed("Choose a supplier before sending", details={"field": "supplierUserIds"})
-    product = request.product
-    series_by_currency = {series.currency: series for series in catalogue.buyer_series(product)}
     for row in request.suppliers:
-        listing = _listing_for(session, product, row.supplier_user_id)
-        if listing is None:
-            raise ValidationFailed(
-                "A selected supplier is no longer listing this product",
-                details={"supplierUserId": str(row.supplier_user_id)},
-            )
-        series = series_by_currency.get(listing.currency)
-        negotiation = negotiations.create_negotiation(
-            session,
-            actor,
-            product_code=product.product_code,
-            quantity=request.quantity,
-            series_code=series.code if series else None,
-            currency=None if series else listing.currency,
-            offered_price=request.offered_price if request.offered_price is not None else listing.asking_price,
-            supplier_user_id=row.supplier_user_id,
-            message=request.message or f"Purchase request {request.request_number}.",
-            destination_pin=request.destination_pin,
-            freight_basis=request.freight_basis,
-            required_by=request.required_by,
-            payment_terms=request.payment_terms,
-            requirements=request.requirements,
-        )
-        row.negotiation_id = negotiation.id
-        row.negotiation = negotiation
+        row.negotiation = _open_one(session, actor, request, row)
+        row.negotiation_id = row.negotiation.id
     request.status = RequestStatus.SENT
+    session.flush()
+    session.expire(request, ["suppliers"])
+    return get_request(session, actor, request.id)
+
+
+def _open_one(
+    session: Session, actor: Actor, request: PurchaseRequest, row: PurchaseRequestSupplier, offered_price: Decimal | None = None,
+) -> Negotiation:
+    product = request.product
+    listing = _listing_for(session, product, row.supplier_user_id)
+    if listing is None:
+        raise ValidationFailed(
+            "A selected supplier is no longer listing this product",
+            details={"supplierUserId": str(row.supplier_user_id)},
+        )
+    quantity = catalogue_listings.sellable_quantity(listing, request.quantity)
+    if listing.maximum_quantity is not None and quantity < listing.minimum_quantity:
+        raise ValidationFailed(
+            "This supplier does not have that much left",
+            details={"available": f"{listing.maximum_quantity.normalize():f}"},
+        )
+    series_by_currency = {series.currency: series for series in catalogue.buyer_series(product)}
+    series = series_by_currency.get(listing.currency)
+    base = offered_price if offered_price is not None else (
+        request.offered_price if request.offered_price is not None else listing.asking_price
+    )
+    return negotiations.create_negotiation(
+        session,
+        actor,
+        product_code=product.product_code,
+        quantity=quantity,
+        series_code=series.code if series else None,
+        currency=None if series else listing.currency,
+        offered_price=adjust_unit_price(base, request.payment_terms),
+        supplier_user_id=row.supplier_user_id,
+        message=request.message or f"Purchase request {request.request_number}.",
+        destination_pin=request.destination_pin,
+        freight_basis=request.freight_basis,
+        required_by=request.required_by,
+        payment_terms=request.payment_terms,
+        requirements=request.requirements,
+    )
+
+
+def send_supplier(
+    session: Session, actor: Actor, request_id: uuid.UUID, supplier_user_id: uuid.UUID, *, offered_price: Decimal | None = None,
+) -> PurchaseRequest:
+    """Open a negotiation for one supplier and leave the others on the request for later."""
+    request = get_request(session, actor, request_id)
+    if request.buyer_user_id != actor.user_id:
+        raise PermissionDenied("Only the buyer can send a purchase request")
+    if request.status not in (RequestStatus.DRAFT, RequestStatus.SENT, RequestStatus.IN_NEGOTIATION):
+        raise InvalidStateTransition("This purchase request is closed", details={"status": request.status})
+    row = next((item for item in request.suppliers if item.supplier_user_id == supplier_user_id), None)
+    if row is None:
+        raise NotFound("That supplier is not on this request")
+    if row.negotiation_id is not None:
+        raise ValidationFailed("This supplier already has a negotiation on this request")
+    negotiation = _open_one(session, actor, request, row, offered_price)
+    row.negotiation_id = negotiation.id
+    row.negotiation = negotiation
+    session.flush()
+    session.expire(request, ["suppliers"])
+    return get_request(session, actor, request.id)
+
+
+def place_supplier(session: Session, actor: Actor, request_id: uuid.UUID, supplier_user_id: uuid.UUID) -> PurchaseRequest:
+    """Place an order at this supplier's asking price and keep the other suppliers on the request."""
+    request = get_request(session, actor, request_id)
+    if request.buyer_user_id != actor.user_id:
+        raise PermissionDenied("Only the buyer can place an order from this request")
+    if request.status not in (RequestStatus.DRAFT, RequestStatus.SENT, RequestStatus.IN_NEGOTIATION):
+        raise InvalidStateTransition("This purchase request is closed", details={"status": request.status})
+    row = next((item for item in request.suppliers if item.supplier_user_id == supplier_user_id), None)
+    if row is None:
+        raise NotFound("That supplier is not on this request")
+    if row.negotiation_id is not None:
+        raise ValidationFailed("This supplier already has a negotiation on this request")
+    from app.orders.service import place_at_asking_price
+    order = place_at_asking_price(
+        session, actor, product_code=request.product.product_code, supplier_user_id=row.supplier_user_id,
+        quantity=request.quantity, destination_pin=request.destination_pin, freight_basis=request.freight_basis,
+        payment_terms=request.payment_terms,
+    )
+    row.negotiation_id = order.negotiation_id
+    row.negotiation = session.get(Negotiation, order.negotiation_id)
     session.flush()
     session.expire(request, ["suppliers"])
     return get_request(session, actor, request.id)
@@ -297,7 +364,8 @@ def cancel_supplier(
         )
     talks = [item.negotiation for item in request.suppliers if item.negotiation is not None]
     still_open = [item for item in talks if item.status not in (NegotiationStatus.CANCELLED, NegotiationStatus.REJECTED)]
-    if talks and not still_open:
+    unsent = any(item.negotiation is None for item in request.suppliers)
+    if talks and not still_open and not unsent:
         request.status = RequestStatus.CANCELLED
         request.cancelled_at = now
         session.flush()

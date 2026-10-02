@@ -98,6 +98,7 @@ class SupplierMatchOut(ApiModel):
     maximum_quantity: str | None = None
     uom: str
     availability: Literal["in_stock", "limited", "on_request"]
+    sold_out: bool = False
     origin_pin: str | None
     origin_label: str | None
     meets_minimum: bool

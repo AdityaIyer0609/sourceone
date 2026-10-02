@@ -298,6 +298,15 @@ def create_negotiation(
     supplier = _resolve_supplier(session, supplier_user_id)
     if supplier.id == actor.user_id:
         raise ValidationFailed("Buyer and supplier must be different users")
+    from app.catalogue.listings import sellable_quantity
+    from app.models.listing import SupplierListing
+    listing = session.scalar(
+        select(SupplierListing).where(
+            SupplierListing.supplier_user_id == supplier.id,
+            SupplierListing.product_id == product.id,
+        )
+    )
+    quantity = sellable_quantity(listing, quantity)
     negotiation = Negotiation(
         negotiation_number=_next_number(session, now),
         buyer_user_id=actor.user_id,
@@ -386,9 +395,29 @@ def make_offer(
     _participant_move(actor, negotiation, "offer")
     _check_offer_terms(negotiation, currency, uom)
     latest = _latest(negotiation)
+    chosen = quantity if quantity is not None else (latest.quantity if latest else negotiation.quantity)
+    from app.models.listing import SupplierListing
+    listing = session.scalar(
+        select(SupplierListing).where(
+            SupplierListing.supplier_user_id == negotiation.supplier_user_id,
+            SupplierListing.product_id == negotiation.product_id,
+        )
+    )
+    if listing is not None and listing.sold_out:
+        raise ValidationFailed("This supplier is sold out")
+    cap = listing.maximum_quantity if listing is not None and listing.availability != "on_request" else None
+    if cap is not None and chosen > cap:
+        if quantity is None:
+            chosen = cap
+        else:
+            raise ValidationFailed(
+                f"Only {cap.normalize():f} {listing.uom.lower()} is still available",
+                details={"available": f"{cap.normalize():f}", "quantity": f"{chosen.normalize():f}"},
+            )
+    negotiation.quantity = chosen
     _add_version(
         session, negotiation, actor, price=price,
-        quantity=quantity or (latest.quantity if latest else negotiation.quantity), message=message, now=now,
+        quantity=chosen, message=message, now=now,
         delivery_date=_supplier_delivery_date(negotiation, actor, delivery_date),
     )
     negotiation.status = NegotiationStatus.OPEN if negotiation.status == NegotiationStatus.DRAFT else NegotiationStatus.COUNTERED

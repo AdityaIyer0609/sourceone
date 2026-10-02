@@ -29,6 +29,10 @@ export interface RequestSupplier {
   quote: QuotePosition
   requirementResponses: { key: string; status: 'met' | 'not_met'; comment: string | null }[]
   supplyNote: string | null
+  availability: 'in_stock' | 'limited' | 'on_request' | null
+  minimumQuantity: string | null
+  maximumQuantity: string | null
+  soldOut: boolean
 }
 
 export interface PurchaseRequest {
@@ -93,3 +97,11 @@ export const cancelPurchaseRequest = (id: string) =>
 
 export const cancelRequestSupplier = (id: string, supplierUserId: string) =>
   changed(apiClient.post<PurchaseRequest>(`/purchase-requests/${id}/suppliers/${supplierUserId}/cancel`))
+
+export const sendRequestSupplier = (id: string, supplierUserId: string, offeredPrice?: string) =>
+  changed(apiClient.post<PurchaseRequest>(`/purchase-requests/${id}/suppliers/${supplierUserId}/send`, {
+    offeredPrice: offeredPrice || undefined,
+  }))
+
+export const placeRequestSupplier = (id: string, supplierUserId: string) =>
+  changed(apiClient.post<PurchaseRequest>(`/purchase-requests/${id}/suppliers/${supplierUserId}/order`))

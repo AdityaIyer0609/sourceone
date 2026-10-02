@@ -26,6 +26,10 @@ class SuppliersIn(ApiModel):
     supplier_user_ids: list[uuid.UUID] = Field(min_length=1)
 
 
+class SendSupplierIn(ApiModel):
+    offered_price: Decimal | None = Field(default=None, gt=0, max_digits=18, decimal_places=4)
+
+
 class RequirementOut(ApiModel):
     key: str
     label: str
@@ -50,6 +54,10 @@ class RequestSupplierOut(ApiModel):
     quote: QuotePositionOut
     requirement_responses: list[RequirementResponseOut] = []
     supply_note: str | None = None
+    availability: Literal["in_stock", "limited", "on_request"] | None = None
+    minimum_quantity: str | None = None
+    maximum_quantity: str | None = None
+    sold_out: bool = False
 
 
 class PurchaseRequestOut(ApiModel):

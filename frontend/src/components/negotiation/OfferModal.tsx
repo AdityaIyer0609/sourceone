@@ -14,6 +14,7 @@ export function OfferModal({
   currency,
   uom,
   initialQuantity,
+  maxQuantity,
   submitLabel,
   suppliers,
   productCode,
@@ -29,6 +30,7 @@ export function OfferModal({
   currency: string;
   uom: string;
   initialQuantity: string;
+  maxQuantity?: string | null;
   submitLabel: string;
   suppliers?: NegotiationSupplier[];
   productCode?: string;
@@ -57,7 +59,8 @@ export function OfferModal({
   const needsFreight = Boolean(suppliers);
   const pinOk = /^[1-9][0-9]{5}$/.test(pin);
   const askDelivery = Boolean(requestedDelivery);
-  const valid = Number(quantity) > 0 && Number(price) > 0 && (!suppliers || Boolean(supplierId)) && (!needsFreight || pinOk) && (!askDelivery || Boolean(deliveryDate));
+  const overStock = Boolean(maxQuantity) && Number(quantity) > Number(maxQuantity);
+  const valid = Number(quantity) > 0 && !overStock && Number(price) > 0 && (!suppliers || Boolean(supplierId)) && (!needsFreight || pinOk) && (!askDelivery || Boolean(deliveryDate));
   useEffect(() => {
     if (!needsFreight || !pinOk || !productCode || !supplierId || !(Number(quantity) > 0)) {
       setEstimate(null);
@@ -107,7 +110,7 @@ export function OfferModal({
         </strong></span>
       ) : null}
       <div className="modal-cost">
-        <span><small>Quantity ({uom})</small><strong><Input inputMode="decimal" value={quantity} onChange={(event) => setQuantity(event.target.value)} aria-label="Quantity" /></strong></span>
+        <span><small>Quantity ({uom})</small><strong><Input inputMode="decimal" value={quantity} onChange={(event) => setQuantity(event.target.value)} aria-label="Quantity" /></strong>{maxQuantity ? <small>{overStock ? `Only ${Number(maxQuantity).toLocaleString("en-IN")} ${uom.toLowerCase()} is still available` : `Up to ${Number(maxQuantity).toLocaleString("en-IN")} ${uom.toLowerCase()} is available`}</small> : null}</span>
         <span><small>Offered price ({currency} / {uom.toLowerCase()})</small><strong><Input inputMode="decimal" value={price} placeholder="0.00" onChange={(event) => setPrice(event.target.value)} aria-label="Offered price" /></strong></span>
       </div>
       {needsFreight && (

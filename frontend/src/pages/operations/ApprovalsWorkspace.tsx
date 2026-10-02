@@ -35,7 +35,7 @@ export function ApprovalsWorkspace() {
   return (
     <>
       {error && <p className="negative" role="alert">{error}</p>}
-      <AsyncContent isLoading={queue.isLoading && !queue.data} error={queue.error} onRetry={queue.reload} isEmpty={Boolean(queue.data) && rows.length === 0} emptyTitle="No approval requests" emptyMessage="An order above the company material threshold appears here before it is placed." loadingLabel="Loading approvals…">
+      <AsyncContent isLoading={queue.isLoading && !queue.data} error={queue.error} onRetry={queue.reload} isEmpty={Boolean(queue.data) && rows.length === 0} emptyTitle="No approval requests" emptyMessage="New orders are placed directly. Nothing is waiting for approval." loadingLabel="Loading approvals…">
         <div className="market-table-wrap"><table className="market-table"><thead><tr><th>Request</th><th>Material total</th><th>Threshold</th><th>Submitted</th><th>Decision</th><th/></tr></thead><tbody>
           {rows.map((row) => (
             <tr key={row.id}>

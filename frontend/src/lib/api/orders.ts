@@ -108,6 +108,7 @@ export const placeAtAsking = (body: {
   quantity: string
   destinationPin: string
   freightBasis?: 'standard' | 'distance'
+  paymentTerms?: string
 }) => apiClient.post<Order | OrderApproval>(`${BASE}/from-listing`, body)
 
 export const createOrderFromNegotiation = (

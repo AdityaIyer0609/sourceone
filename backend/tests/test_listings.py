@@ -158,4 +158,15 @@ def test_direct_order_uses_the_asking_price_and_reduces_stock(client, world, pro
         "quantity": "500",
         "destinationPin": "560001",
     }, headers=as_user(world, "buyer"))
-    assert again.status_code == 422
+    assert again.status_code == 201, again.text
+    assert again.json()["quantity"] == "400"
+    sold = client.get("/api/v1/listings", headers=as_user(world, "supplier")).json()
+    emptied = next(item for item in sold if item["id"] == created["id"])
+    assert emptied["maximumQuantity"] is None and emptied["availability"] == "on_request"
+    blocked = client.post("/api/v1/orders/from-listing", json={
+        "productCode": product.product_code,
+        "supplierUserId": str(world.users["supplier"].id),
+        "quantity": "100",
+        "destinationPin": "560001",
+    }, headers=as_user(world, "buyer"))
+    assert blocked.status_code == 422

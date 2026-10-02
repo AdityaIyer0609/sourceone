@@ -48,13 +48,23 @@ def _version(negotiation: Negotiation, version: NegotiationVersion) -> schemas.V
     )
 
 
-def _supply_note(db: Session, negotiation: Negotiation) -> str | None:
-    listing = db.scalar(select(SupplierListing).where(
+def _listing(db: Session, negotiation: Negotiation) -> SupplierListing | None:
+    return db.scalar(select(SupplierListing).where(
         SupplierListing.supplier_user_id == negotiation.supplier_user_id,
         SupplierListing.product_id == negotiation.product_id,
     ))
+
+
+def _supply_note(db: Session, negotiation: Negotiation) -> str | None:
+    listing = _listing(db, negotiation)
     if listing is None:
         return None
+    if listing.sold_out:
+        return "Sold out."
+    latest = negotiation.versions[-1] if negotiation.versions else None
+    if latest is not None and latest.quantity > negotiation.quantity and listing.maximum_quantity is not None:
+        left = f"{negotiation.quantity.normalize():f}"
+        return f"Only {left} {negotiation.uom.lower()} is still available, so this negotiation is now for {left} {negotiation.uom.lower()}."
     return supply_note(listing, negotiation.quantity)
 
 
@@ -117,6 +127,12 @@ def _present(actor: Actor, db: Session, negotiation: Negotiation) -> schemas.Neg
         ],
         supply_note=_supply_note(db, negotiation),
         delivery_note=service.delivery_note(negotiation),
+        available_quantity=(
+            quantity_text(stock.maximum_quantity)
+            if (stock := _listing(db, negotiation)) is not None and not stock.sold_out and stock.maximum_quantity is not None
+            else None
+        ),
+        sold_out=bool(stock and stock.sold_out),
     )
 
 

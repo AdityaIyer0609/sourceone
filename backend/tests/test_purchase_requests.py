@@ -246,6 +246,30 @@ def test_buyer_price_is_the_opening_offer(client, world, product):
     assert room.json()["versions"][0]["offeredPrice"]["amount"] == "97.5000"
 
 
+def test_payment_terms_adjust_the_opening_price(client, world, product):
+    _create(client, world, product)
+    buyer = as_user(world, "buyer")
+    created = client.post(REQUESTS, json=_body(
+        product, offeredPrice="100.0000", paymentTerms="Advance",
+        supplierUserIds=[str(world.users["supplier"].id)],
+    ), headers=buyer)
+    assert created.status_code == 201, created.text
+    sent = client.post(f"{REQUESTS}/{created.json()['id']}/send", headers=buyer)
+    assert sent.status_code == 200, sent.text
+    room = client.get(f"{NEGOTIATIONS}/{sent.json()['suppliers'][0]['negotiationId']}", headers=buyer)
+    assert room.json()["paymentTerms"] == "Advance"
+    assert room.json()["versions"][0]["offeredPrice"]["amount"] == "99.0000"
+    late = client.post(REQUESTS, json=_body(
+        product, offeredPrice="100.0000", paymentTerms="8-14 days",
+        supplierUserIds=[str(world.users["supplier"].id)],
+    ), headers=buyer)
+    assert late.status_code == 201, late.text
+    sent_late = client.post(f"{REQUESTS}/{late.json()['id']}/send", headers=buyer)
+    assert sent_late.status_code == 200, sent_late.text
+    late_room = client.get(f"{NEGOTIATIONS}/{sent_late.json()['suppliers'][0]['negotiationId']}", headers=buyer)
+    assert late_room.json()["versions"][0]["offeredPrice"]["amount"] == "101.5000"
+
+
 def test_cancelling_one_supplier_leaves_the_request_open(client, world, product):
     from sqlalchemy import select
 
@@ -283,3 +307,90 @@ def test_cancelling_one_supplier_leaves_the_request_open(client, world, product)
     rows = {row["supplierUserId"]: row["negotiationStatus"] for row in body["suppliers"]}
     assert rows[str(world.users["supplier"].id)] == "cancelled"
     assert rows[str(other.id)] == "open"
+
+
+def test_asking_one_supplier_keeps_the_others_on_the_request(client, world, product):
+    _create(client, world, product, maximumQuantity="20000")
+    from app.models.identity import Organisation, Role, User, UserRole
+    from tests.test_api import as_actor
+    other_org = Organisation(code=f"ASK-{world.suffix}", name="Ask Mill", org_type="supplier")
+    world.session.add(other_org)
+    world.session.flush()
+    other = User(email=f"ask-{world.suffix.lower()}@test.local", full_name="Ask Supplier", organisation_id=other_org.id)
+    world.session.add(other)
+    world.session.flush()
+    role = world.session.scalar(select(Role).where(Role.code == "supplier"))
+    world.session.add(UserRole(user_id=other.id, role_id=role.id))
+    world.session.flush()
+    assert client.post("/api/v1/listings", json={
+        "productCode": product.product_code, "minimumQuantity": "100", "askingPrice": "110.0000",
+        "currency": "INR", "availability": "on_request",
+    }, headers=as_actor(other)).status_code == 201
+    buyer = as_user(world, "buyer")
+    created = client.post(REQUESTS, json=_body(
+        product, offeredPrice="100.0000",
+        supplierUserIds=[str(world.users["supplier"].id), str(other.id)],
+    ), headers=buyer)
+    assert created.status_code == 201, created.text
+    request_id = created.json()["id"]
+    asked = client.post(
+        f"{REQUESTS}/{request_id}/suppliers/{other.id}/send",
+        json={"offeredPrice": "100.0000"},
+        headers=buyer,
+    )
+    assert asked.status_code == 200, asked.text
+    rows = {row["supplierUserId"]: row for row in asked.json()["suppliers"]}
+    assert asked.json()["status"] == "sent"
+    assert rows[str(other.id)]["negotiationStatus"] == "open"
+    assert rows[str(world.users["supplier"].id)]["negotiationId"] is None
+    ordered = client.post(f"{REQUESTS}/{request_id}/suppliers/{world.users['supplier'].id}/order", headers=buyer)
+    assert ordered.status_code == 200, ordered.text
+    body = ordered.json()
+    assert body["status"] != "converted"
+    placed = next(row for row in body["suppliers"] if row["supplierUserId"] == str(world.users["supplier"].id))
+    waiting = next(row for row in body["suppliers"] if row["supplierUserId"] == str(other.id))
+    assert placed["negotiationStatus"] == "accepted"
+    assert waiting["negotiationStatus"] == "open"
+
+
+def test_another_order_reduces_an_open_negotiation_and_sells_out(client, world, product):
+    _create(client, world, product, minimumQuantity="100", maximumQuantity="2000")
+    buyer = as_user(world, "buyer")
+    started = client.post(NEGOTIATIONS, json={
+        "productCode": product.product_code, "quantity": "1000", "offeredPrice": "90.0000",
+        "supplierUserId": str(world.users["supplier"].id),
+    }, headers=buyer)
+    assert started.status_code == 201, started.text
+    negotiation_id = started.json()["id"]
+    assert started.json()["quantity"] == "1000"
+    taken = client.post("/api/v1/orders/from-listing", json={
+        "productCode": product.product_code, "supplierUserId": str(world.users["supplier"].id),
+        "quantity": "1500", "destinationPin": "560001",
+    }, headers=buyer)
+    assert taken.status_code == 201, taken.text
+    assert taken.json()["quantity"] == "1500"
+    reduced = client.get(f"{NEGOTIATIONS}/{negotiation_id}", headers=buyer)
+    assert reduced.status_code == 200, reduced.text
+    assert reduced.json()["quantity"] == "500"
+    assert reduced.json()["status"] == "open"
+    assert "500" in reduced.json()["supplyNote"]
+    too_much = client.post(
+        f"{NEGOTIATIONS}/{negotiation_id}/offers",
+        json={"offeredPrice": "91.0000", "quantity": "800"},
+        headers=as_user(world, "supplier"),
+    )
+    assert too_much.status_code == 422
+    finished = client.post("/api/v1/orders/from-listing", json={
+        "productCode": product.product_code, "supplierUserId": str(world.users["supplier"].id),
+        "quantity": "500", "destinationPin": "560001",
+    }, headers=buyer)
+    assert finished.status_code == 201, finished.text
+    sold = client.get(f"{NEGOTIATIONS}/{negotiation_id}", headers=buyer).json()
+    assert sold["status"] == "cancelled"
+    assert sold["closedReason"] == "Sold out"
+    assert sold["soldOut"] is True
+    blocked = client.post("/api/v1/orders/from-listing", json={
+        "productCode": product.product_code, "supplierUserId": str(world.users["supplier"].id),
+        "quantity": "100", "destinationPin": "560001",
+    }, headers=buyer)
+    assert blocked.status_code == 422

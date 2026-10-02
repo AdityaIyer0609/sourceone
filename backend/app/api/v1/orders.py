@@ -9,7 +9,6 @@ from fastapi.responses import FileResponse, JSONResponse
 from app.api.deps import DbSession, require_any
 from app.api.v1.negotiations import party_out, quantity_text
 from app.identity.service import Actor
-from app.models.approval import OrderApproval
 from app.models.order import Order
 from app.orders import documents, reorder, service
 from app.schemas.negotiation import RequirementOut
@@ -178,12 +177,9 @@ def _present(actor: Actor, order: Order) -> OrderOut:
 def place_at_asking(body: PlaceAtAskingIn, db: DbSession, actor: Participant):
     result = service.place_at_asking_price(
         db, actor, product_code=body.product_code, supplier_user_id=body.supplier_user_id, quantity=body.quantity,
-        destination_pin=body.destination_pin, freight_basis=body.freight_basis,
+        destination_pin=body.destination_pin, freight_basis=body.freight_basis, payment_terms=body.payment_terms,
     )
     db.commit()
-    if isinstance(result, OrderApproval):
-        from app.api.v1.approvals import _present as present_approval
-        return JSONResponse(status_code=202, content=present_approval(result).model_dump(mode="json", by_alias=True))
     presented = _present(actor, service.get_order(db, actor, result.id))
     return JSONResponse(status_code=201, content=presented.model_dump(mode="json", by_alias=True))
 
@@ -194,9 +190,6 @@ def create_from_negotiation(negotiation_id: uuid.UUID, body: CreateOrderIn, db: 
         db, actor, negotiation_id, destination_pin=body.destination_pin, freight_basis=body.freight_basis,
     )
     db.commit()
-    if isinstance(result, OrderApproval):
-        from app.api.v1.approvals import _present as present_approval
-        return JSONResponse(status_code=202, content=present_approval(result).model_dump(mode="json", by_alias=True))
     presented = _present(actor, service.get_order(db, actor, result.id))
     return JSONResponse(status_code=201, content=presented.model_dump(mode="json", by_alias=True))
 

@@ -11,14 +11,14 @@ from sqlalchemy import or_, select, text
 from sqlalchemy.orm import Session, selectinload
 
 from app.catalogue import products as catalogue
-from app.catalogue.listings import take_stock
+from app.catalogue.listings import sellable_quantity, take_stock
 from app.catalogue.specifications import requirement_snapshot
 from app.core.clock import business_today, utcnow
 from app.core.errors import DuplicateOrder, InvalidStateTransition, NotFound, OrderClosed, PermissionDenied, ValidationFailed
 from app.freight import service as freight
 from app.identity.service import Actor
-from app.models.approval import OrderApproval
-from app.models.identity import Organisation, User
+from app.pricing.payment_terms import adjust_unit_price
+from app.models.identity import User
 from app.models.listing import SupplierListing
 from app.models.negotiation import Negotiation, NegotiationVersion
 from app.models.order import Order, OrderStatusEvent
@@ -89,8 +89,8 @@ def _freight_snapshot(session: Session, negotiation: Negotiation, accepted, pin:
 
 def place_at_asking_price(
     session: Session, actor: Actor, *, product_code: str, supplier_user_id: uuid.UUID, quantity: Decimal,
-    destination_pin: str, freight_basis: str = "standard", now: datetime | None = None,
-) -> Order | OrderApproval:
+    destination_pin: str, freight_basis: str = "standard", payment_terms: str | None = None, now: datetime | None = None,
+) -> Order:
     """Buy the listing at its asking price. No counter-offer. Stock moves only if the order is created."""
     actor.require(OrderPermission.PLACE)
     now = now or utcnow()
@@ -104,22 +104,26 @@ def place_at_asking_price(
     )
     if listing is None:
         raise NotFound("That supplier is not listing this product")
+    if listing.sold_out:
+        raise ValidationFailed("This supplier is sold out")
     if listing.availability == "on_request" or listing.maximum_quantity is None:
         raise ValidationFailed("This supplier has not confirmed stock. Ask them instead.")
-    if quantity < listing.minimum_quantity or quantity > listing.maximum_quantity:
+    quantity = sellable_quantity(listing, quantity)
+    if quantity < listing.minimum_quantity:
         raise ValidationFailed(
             "That quantity is outside what this supplier can sell now",
             details={"available": f"{listing.maximum_quantity.normalize():f}"},
         )
     negotiation = negotiations.create_negotiation(
         session, actor, product_code=product_code, quantity=quantity, supplier_user_id=supplier_user_id,
-        destination_pin=destination_pin, freight_basis=freight_basis, currency=listing.currency, now=now,
+        destination_pin=destination_pin, freight_basis=freight_basis, payment_terms=payment_terms,
+        currency=listing.currency, now=now,
     )
     version = NegotiationVersion(
         negotiation_id=negotiation.id,
         version_number=1,
         created_by_user_id=listing.supplier_user_id,
-        offered_price=listing.asking_price,
+        offered_price=adjust_unit_price(listing.asking_price, payment_terms),
         currency=listing.currency,
         quantity=quantity,
         uom=listing.uom,
@@ -145,9 +149,18 @@ def place_at_asking_price(
 def create_from_negotiation(
     session: Session, actor: Actor, negotiation_id: uuid.UUID, *, destination_pin: str,
     freight_basis: str = "standard", now: datetime | None = None,
-) -> Order | OrderApproval:
+) -> Order:
     actor.require(OrderPermission.PLACE)
     now = now or utcnow()
+    # Lock the listing before the negotiation so a second order cannot deadlock while stock is capped.
+    preview = session.get(Negotiation, negotiation_id)
+    if preview is not None:
+        session.scalar(
+            select(SupplierListing).where(
+                SupplierListing.supplier_user_id == preview.supplier_user_id,
+                SupplierListing.product_id == preview.product_id,
+            ).with_for_update()
+        )
     # Visibility and ownership come from the negotiation rules; only its buyer may place the order.
     negotiation = negotiations.get_negotiation(session, actor, negotiation_id, for_update=True)
     if negotiation.buyer_user_id != actor.user_id or not actor.has(NegotiationPermission.BUY):
@@ -165,49 +178,27 @@ def create_from_negotiation(
         )
 
     accepted = negotiations.negotiated_version(negotiation)
+    listing = session.scalar(
+        select(SupplierListing).where(
+            SupplierListing.supplier_user_id == negotiation.supplier_user_id,
+            SupplierListing.product_id == negotiation.product_id,
+        )
+    )
+    if listing is not None and listing.sold_out:
+        raise ValidationFailed("This supplier is sold out")
+    quantity = sellable_quantity(listing, min(accepted.quantity, negotiation.quantity))
+    if quantity <= 0:
+        raise ValidationFailed("This supplier is sold out")
     pin = destination_pin.strip()
     if not re.fullmatch(r"[1-9][0-9]{5}", pin):
         raise ValidationFailed("Delivery PIN must be 6 digits", details={"destinationPin": pin})
     if freight_basis not in ("standard", "distance"):
         raise ValidationFailed("Choose normal freight or road distance", details={"freightBasis": freight_basis})
-    total = order_total(accepted.quantity, accepted.offered_price)
-    buyer = session.get(User, negotiation.buyer_user_id)
-    organisation = session.get(Organisation, buyer.organisation_id) if buyer is not None else None
-    threshold = organisation.approval_threshold_amount if organisation is not None else None
-    if threshold is not None and organisation.approval_threshold_currency != accepted.currency:
-        raise ValidationFailed(
-            "The company approval threshold uses a different currency from this order",
-            details={"thresholdCurrency": organisation.approval_threshold_currency, "currency": accepted.currency},
-        )
-    if threshold is not None and total > threshold:
-        waiting = session.scalar(
-            select(OrderApproval).where(OrderApproval.negotiation_id == negotiation.id, OrderApproval.status == "pending")
-        )
-        if waiting is not None:
-            raise InvalidStateTransition(
-                "This order is already waiting for approval",
-                details={"approvalId": str(waiting.id)},
-            )
-        approval = OrderApproval(
-            negotiation_id=negotiation.id,
-            organisation_id=organisation.id,
-            submitted_by_user_id=actor.user_id,
-            amount=total,
-            currency=accepted.currency,
-            threshold_amount=threshold,
-            threshold_currency=organisation.approval_threshold_currency,
-            destination_pin=pin,
-            freight_basis=freight_basis,
-            status="pending",
-            created_at=now,
-        )
-        session.add(approval)
-        session.flush()
-        return approval
-    return _insert_order(session, actor, negotiation, accepted, pin, freight_basis, now)
+    return _insert_order(session, actor, negotiation, accepted, pin, freight_basis, now, quantity=quantity)
 
 
-def _insert_order(session, actor, negotiation, accepted, pin: str, freight_basis: str, now: datetime) -> Order:
+def _insert_order(session, actor, negotiation, accepted, pin: str, freight_basis: str, now: datetime, quantity: Decimal | None = None) -> Order:
+    quantity = accepted.quantity if quantity is None else quantity
     freight_snapshot = _freight_snapshot(session, negotiation, accepted, pin, freight_basis)
     order = Order(
         order_number=_next_number(session, now),
@@ -216,11 +207,11 @@ def _insert_order(session, actor, negotiation, accepted, pin: str, freight_basis
         buyer_user_id=negotiation.buyer_user_id,
         supplier_user_id=negotiation.supplier_user_id,
         product_id=negotiation.product_id,
-        quantity=accepted.quantity,
+        quantity=quantity,
         uom=accepted.uom,
         currency=accepted.currency,
         agreed_unit_price=accepted.offered_price,
-        total_value=order_total(accepted.quantity, accepted.offered_price),
+        total_value=order_total(quantity, accepted.offered_price),
         destination_pin=pin,
         freight_status=freight_snapshot["status"],
         freight_amount=freight_snapshot["amount"],
@@ -232,7 +223,7 @@ def _insert_order(session, actor, negotiation, accepted, pin: str, freight_basis
     )
     session.add(order)
     session.flush()
-    take_stock(session, negotiation.supplier_user_id, negotiation.product_id, accepted.quantity)
+    take_stock(session, negotiation.supplier_user_id, negotiation.product_id, quantity)
     _record_event(session, order, None, actor, note=None, now=now)
     from app.purchase_requests.service import mark_converted
     mark_converted(session, negotiation.id)

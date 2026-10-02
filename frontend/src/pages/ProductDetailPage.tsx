@@ -185,7 +185,7 @@ export function ProductDetailPage() {
                     destinationPin,
                   }).then((result) => {
                     if (isPlacedOrder(result)) navigate(`${paths.orders}?id=${encodeURIComponent(result.id)}`);
-                    else setTradeError("Submitted for approval. No order exists until someone else in the company approves the material total.");
+                    else setTradeError("The order was not placed.");
                   }).catch((cause) => setTradeError(getErrorMessage(cause))).finally(() => setBusySupplier(null));
                 }}
                 onNegotiate={(supplierUserId, offeredPrice) => {

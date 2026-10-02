@@ -34,11 +34,13 @@ def resolve_maximum(availability: str, minimum: Decimal, maximum: Decimal | None
 
 def supply_note(listing: SupplierListing, quantity: Decimal) -> str | None:
     """Information for the buyer. It does not change the quantity they can request or order."""
+    if listing.sold_out:
+        return "Sold out."
     if listing.availability == "on_request":
         return "This supplier has not confirmed the material is ready. Ask them, and place an order only after they accept."
     if listing.maximum_quantity is not None and quantity > listing.maximum_quantity:
         cap = f"{listing.maximum_quantity.normalize():f}"
-        return f"This quantity is above the {cap} {listing.uom} this supplier said they can spare."
+        return f"Only {cap} {listing.uom.lower()} is still available, so this is now for {cap} {listing.uom.lower()}."
     return None
 
 
@@ -156,6 +158,7 @@ def update_listing(
                 raise ValidationFailed("An on-request listing has no stock quantity", details={"field": "maximumQuantity"})
             chosen = None
         cap = resolve_maximum(next_availability, next_minimum, chosen)
+        listing.sold_out = False
     market_changed = False
     if asking_price is not None and asking_price != listing.asking_price:
         listing.asking_price = asking_price
@@ -180,6 +183,19 @@ def set_listing_active(session: Session, actor: Actor, listing_id: uuid.UUID, *,
     return update_listing(session, actor, listing_id, is_active=is_active)
 
 
+def sellable_quantity(listing: SupplierListing | None, quantity: Decimal) -> Decimal:
+    """The quantity that can still be bought. Sold out is refused. A larger ask is cut down to what is left."""
+    if listing is None or listing.availability == "on_request" or listing.maximum_quantity is None:
+        if listing is not None and listing.sold_out:
+            raise ValidationFailed("This supplier is sold out")
+        return quantity
+    if listing.sold_out:
+        raise ValidationFailed("This supplier is sold out")
+    if quantity > listing.maximum_quantity:
+        return listing.maximum_quantity
+    return quantity
+
+
 def take_stock(session: Session, supplier_user_id: uuid.UUID, product_id: uuid.UUID, quantity: Decimal) -> None:
     """Reduce the supplier's sellable quantity when an order is created. On request has nothing to reduce."""
     listing = session.scalar(
@@ -187,7 +203,11 @@ def take_stock(session: Session, supplier_user_id: uuid.UUID, product_id: uuid.U
         .where(SupplierListing.supplier_user_id == supplier_user_id, SupplierListing.product_id == product_id)
         .with_for_update()
     )
-    if listing is None or listing.availability == "on_request" or listing.maximum_quantity is None:
+    if listing is None:
+        return
+    if listing.sold_out:
+        raise ValidationFailed("This supplier is sold out")
+    if listing.availability == "on_request" or listing.maximum_quantity is None:
         return
     if quantity > listing.maximum_quantity:
         raise ValidationFailed(
@@ -198,10 +218,46 @@ def take_stock(session: Session, supplier_user_id: uuid.UUID, product_id: uuid.U
     if remaining == 0:
         listing.availability = "on_request"
         listing.maximum_quantity = None
+        listing.sold_out = True
     else:
         listing.maximum_quantity = remaining
         if remaining < listing.minimum_quantity:
             listing.minimum_quantity = remaining
+    session.flush()
+    _cap_open_negotiations(session, listing)
+
+
+def _cap_open_negotiations(session: Session, listing: SupplierListing) -> None:
+    """An open negotiation cannot keep a quantity another order has already taken."""
+    from app.core.clock import utcnow
+    from app.models.negotiation import Negotiation
+    from app.models.order import Order
+
+    now = utcnow()
+    rows = session.scalars(
+        select(Negotiation).where(
+            Negotiation.supplier_user_id == listing.supplier_user_id,
+            Negotiation.product_id == listing.product_id,
+            Negotiation.status.in_(("draft", "open", "countered", "accepted")),
+        )
+    ).all()
+    available = None if listing.sold_out else listing.maximum_quantity
+    for negotiation in rows:
+        if negotiation.status == "accepted":
+            ordered = session.scalar(select(Order.id).where(Order.negotiation_id == negotiation.id))
+            if ordered is not None:
+                continue
+            if listing.sold_out:
+                continue
+        if listing.sold_out or available is None or available <= 0:
+            negotiation.status = "cancelled"
+            negotiation.closed_at = now
+            negotiation.closed_by_user_id = negotiation.buyer_user_id
+            negotiation.closed_reason = "Sold out"
+            negotiation.updated_at = now
+        elif negotiation.quantity > available:
+            negotiation.quantity = available
+            negotiation.updated_at = now
     session.flush()
 
 

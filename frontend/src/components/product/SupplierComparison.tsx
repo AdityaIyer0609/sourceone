@@ -43,6 +43,7 @@ export function SupplierComparison({ matches, pin, quantity, uom, buyerPrice, ba
   const button = (match: SupplierMatch, choice: ReturnType<typeof actionFor>) => {
     const name = orgName(match.organisation);
     const busy = busySupplier === match.supplierUserId;
+    if (choice.action === "sold_out") return <Button disabled>Sold out</Button>;
     if (choice.action === "ask") return <Button disabled={busy} onClick={() => onAsk(match.supplierUserId)}>Ask {name}</Button>;
     if (choice.action === "place") return <Button disabled={busy || !(Number(choice.unit) > 0)} onClick={() => onPlace(match.supplierUserId)}>Place order</Button>;
     return <Button variant="secondary" disabled={busy || !(Number(choice.unit) > 0)} onClick={() => onNegotiate(match.supplierUserId, choice.unit)}>Negotiate</Button>;

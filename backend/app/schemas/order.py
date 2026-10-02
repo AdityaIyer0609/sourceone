@@ -44,6 +44,7 @@ class PlaceAtAskingIn(ApiModel):
     quantity: Decimal = Field(gt=0, max_digits=18, decimal_places=3)
     destination_pin: str = Field(min_length=6, max_length=6)
     freight_basis: Literal["standard", "distance"] = "standard"
+    payment_terms: str | None = Field(default=None, max_length=120)
 
 
 class OrderDocumentOut(ApiModel):

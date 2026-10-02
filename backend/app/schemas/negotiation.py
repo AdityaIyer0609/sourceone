@@ -105,6 +105,8 @@ class NegotiationOut(ApiModel):
     requirement_responses: list[RequirementResponseOut] = []
     supply_note: str | None = None
     delivery_note: str | None = None
+    available_quantity: str | None = None
+    sold_out: bool = False
 
 
 class SupplierOptionOut(ApiModel):

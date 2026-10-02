@@ -86,13 +86,16 @@ function NegotiationRoom({ negotiation, order, onChanged, onOrdersChanged }: { n
     }
   };
 
-  const statusLine = negotiation.status === "accepted" || negotiation.status === "rejected" || negotiation.status === "cancelled"
+  const soldOut = negotiation.soldOut || negotiation.closedReason === "Sold out";
+  const statusLine = soldOut
+    ? "Sold out"
+    : negotiation.status === "accepted" || negotiation.status === "rejected" || negotiation.status === "cancelled"
     ? `${titleCase(negotiation.status)}${negotiation.closedAt ? ` · ${formatDateTime(negotiation.closedAt)}` : ""}`
     : negotiation.awaiting ? `${titleCase(negotiation.status)} · Awaiting ${negotiation.awaiting === negotiation.viewerRole ? "you" : negotiation.awaiting}` : titleCase(negotiation.status);
 
   return (
     <>
-      <div className="page-heading"><div><small>NEGOTIATION ROOM · {negotiation.negotiationNumber}</small><Heading level={1}>{negotiation.product.name} · {quantityText(negotiation.quantity, negotiation.uom)}</Heading><p>{negotiation.buyer.organisation} ↔ {negotiation.viewerRole === "buyer" ? <OrgLink organisationId={negotiation.supplier.organisationId}>{negotiation.supplier.organisation}</OrgLink> : negotiation.supplier.organisation}{negotiation.requiredBy ? ` · Required by ${negotiation.requiredBy}` : ""}{negotiation.paymentTerms ? ` · ${negotiation.paymentTerms}` : ""}</p>{negotiation.supplyNote ? <p className="request-note">{negotiation.supplyNote}</p> : null}{negotiation.deliveryNote ? <p className="request-note">{negotiation.deliveryNote}</p> : null}</div><Badge tone={STATUS_TONES[negotiation.status]}><Clock3 size={14} /> {statusLine}</Badge></div>
+      <div className="page-heading"><div><small>NEGOTIATION ROOM · {negotiation.negotiationNumber}</small><Heading level={1}>{negotiation.product.name} · {quantityText(negotiation.quantity, negotiation.uom)}</Heading><p>{negotiation.buyer.organisation} ↔ {negotiation.viewerRole === "buyer" ? <OrgLink organisationId={negotiation.supplier.organisationId}>{negotiation.supplier.organisation}</OrgLink> : negotiation.supplier.organisation}{negotiation.requiredBy ? ` · Required by ${negotiation.requiredBy}` : ""}{negotiation.paymentTerms ? ` · ${negotiation.paymentTerms}` : ""}</p>{negotiation.supplyNote ? <p className="request-note">{negotiation.supplyNote}</p> : null}{negotiation.deliveryNote ? <p className="request-note">{negotiation.deliveryNote}</p> : null}</div><Badge tone={soldOut ? "negative" : STATUS_TONES[negotiation.status]}><Clock3 size={14} /> {statusLine}</Badge></div>
       <div className="negotiation-layout">
         <section className="offer-main">
           {shown ? (
@@ -125,11 +128,12 @@ function NegotiationRoom({ negotiation, order, onChanged, onOrdersChanged }: { n
               <p className="offer-status">Offer accepted. {negotiation.buyer.organisation} can place the order.</p>
             )}
             {negotiation.status === "rejected" && <p className="offer-status">This negotiation was rejected.{negotiation.closedReason ? ` ${negotiation.closedReason}` : ""}</p>}
-            {negotiation.status === "cancelled" && <p className="offer-status">This negotiation was cancelled.{negotiation.closedReason ? ` ${negotiation.closedReason}` : ""}</p>}
+            {soldOut && <p className="offer-status">Sold out. Another order took the remaining stock.</p>}
+            {negotiation.status === "cancelled" && !soldOut && <p className="offer-status">This negotiation was cancelled.{negotiation.closedReason ? ` ${negotiation.closedReason}` : ""}</p>}
             {can.cancel && <Button variant="ghost" disabled={busy} onClick={() => run(() => cancelNegotiation(negotiation.id))}>Cancel negotiation</Button>}
             {order ? (
               <Button variant="ghost" onClick={() => viewOrder(order)}>Order {order.orderNumber} · {titleCase(order.status)}</Button>
-            ) : negotiation.status === "accepted" && negotiation.viewerRole === "buyer" && (
+            ) : negotiation.status === "accepted" && negotiation.viewerRole === "buyer" && !soldOut && (
               <Button onClick={() => setOrderOpen(true)}>Create order</Button>
             )}
           </div>
@@ -155,7 +159,8 @@ function NegotiationRoom({ negotiation, order, onChanged, onOrdersChanged }: { n
           context={`${negotiation.negotiationNumber} · Plenza benchmark (reference): ${benchmarkText}`}
           currency={negotiation.currency}
           uom={negotiation.uom}
-          initialQuantity={latest?.quantity ?? negotiation.quantity}
+          initialQuantity={negotiation.availableQuantity && Number(latest?.quantity ?? negotiation.quantity) > Number(negotiation.availableQuantity) ? negotiation.availableQuantity : (latest?.quantity ?? negotiation.quantity)}
+          maxQuantity={negotiation.availableQuantity}
           requestedDelivery={negotiation.viewerRole === "supplier" ? negotiation.requiredBy : null}
           initialDeliveryDate={[...negotiation.versions].reverse().find((offer) => offer.deliveryDate)?.deliveryDate ?? ""}
           submitLabel={latest ? "Send counter offer" : "Submit offer"}
@@ -192,12 +197,12 @@ export function NegotiationsPage() {
                   <small>{item.negotiationNumber}</small>
                   <small>{listSummary(item)}</small>
                 </span>
-                <Badge tone={STATUS_TONES[item.status]}>{titleCase(item.status)}</Badge>
+                <Badge tone={item.soldOut || item.closedReason === "Sold out" ? "negative" : STATUS_TONES[item.status]}>{item.soldOut || item.closedReason === "Sold out" ? "Sold out" : titleCase(item.status)}</Badge>
               </Button>
             ))}
           </aside>
           <div>
-            {selected && <NegotiationRoom key={`${selected.id}:${selected.versions.length}:${selected.status}`} negotiation={selected} order={order} onChanged={reload} onOrdersChanged={orders.reload} />}
+            {selected && <NegotiationRoom key={`${selected.id}:${selected.versions.length}:${selected.status}:${selected.quantity}:${selected.soldOut}`} negotiation={selected} order={order} onChanged={reload} onOrdersChanged={orders.reload} />}
           </div>
         </div>
       </AsyncContent>

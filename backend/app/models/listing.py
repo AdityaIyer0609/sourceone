@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Integer, Numeric, String, UniqueConstraint, true
+from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Integer, Numeric, String, UniqueConstraint, false, true
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, Timestamps, UUIDPrimaryKey
@@ -48,6 +48,7 @@ class SupplierListing(UUIDPrimaryKey, Timestamps, Base):
     currency: Mapped[str] = mapped_column(String(3))
     is_active: Mapped[bool] = mapped_column(default=True, server_default=true())
     availability: Mapped[str] = mapped_column(String(16))
+    sold_out: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
 
     supplier: Mapped[User] = relationship()
     product: Mapped[Product] = relationship()

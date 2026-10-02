@@ -54,6 +54,7 @@ export interface SupplierMatch {
   maximumQuantity: string | null
   uom: string
   availability: ListingAvailability
+  soldOut?: boolean
   originPin: string | null
   originLabel: string | null
   meetsMinimum: boolean
