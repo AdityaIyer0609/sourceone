@@ -47,7 +47,7 @@ h1, h2, h3, h4 { font-family: "Manrope", sans-serif; letter-spacing: -.035em; }
 .sidebar__top { align-items: center; display: flex; min-height: 75px; padding: 14px 18px; }
 .brand { align-items: center; display: flex; gap: 10px; }
 .sidebar .brand strong { color: #d5dee3; display: block; font-family: Kings, "Times New Roman", serif; font-size: 17px; font-weight: 400; letter-spacing: .04em; }
-.sidebar .brand small { color: #90c010; display: block; font-size: 7px; font-weight: 700; letter-spacing: .04em; line-height: 1.35; margin-top: 2px; max-width: 150px; }
+.sidebar .brand small { color: #d5dee3; display: block; font-size: 7px; font-weight: 700; letter-spacing: .04em; line-height: 1.35; margin-top: 2px; max-width: 150px; }
 .brand__logo { display: block; height: 38px; object-fit: contain; width: 38px; }
 .workspace-switcher { align-items: center; background: var(--nav-2); border: 1px solid #203842; border-radius: var(--radius-md); display: grid; gap: 10px; grid-template-columns: auto 1fr auto; margin: 7px 14px 20px; padding: 11px; }
 .workspace-switcher strong, .user-strip strong { color: #fff; display: block; font-size: 12px; }
