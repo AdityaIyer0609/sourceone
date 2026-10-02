@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Button, Heading, Input } from "../components/ui";
 import { getErrorMessage } from "../lib/api/client";
 import { login, saveSession, type Session } from "../lib/api/auth";
+import { primeBrandSound } from "../components/brand/brandSound";
 
 const ACCOUNTS = [
   ["admin@demo.sourceone", "Platform admin"],
@@ -18,6 +19,7 @@ export function LoginPage({ onSuccess }: { onSuccess: (session: Session) => void
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const submit = async () => {
+    primeBrandSound();
     setBusy(true);
     setError(null);
     try {

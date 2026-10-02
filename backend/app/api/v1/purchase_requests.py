@@ -123,6 +123,7 @@ def _present(actor: Actor, request: PurchaseRequest, db: DbSession) -> PurchaseR
         payment_terms=request.payment_terms,
         requirements=[RequirementOut(**row) for row in request.requirements] if request.requirements is not None else None,
         message=request.message,
+        offered_price=f"{request.offered_price:.4f}" if request.offered_price is not None else None,
         buyer_name=request.buyer.full_name,
         buyer_organisation=request.buyer.organisation.name,
         viewer_role="buyer" if buyer else "supplier",
@@ -144,6 +145,7 @@ def create_request(body: PurchaseRequestIn, db: DbSession, actor: Participant):
     request = service.create_request(
         db, actor, product_code=body.product_code, quantity=body.quantity, uom=body.uom,
         destination_pin=body.destination_pin, message=body.message, supplier_user_ids=body.supplier_user_ids,
+        offered_price=body.offered_price,
         required_by=body.required_by, payment_terms=body.payment_terms, freight_basis=body.freight_basis,
     )
     db.commit()
@@ -172,5 +174,12 @@ def send_request(request_id: uuid.UUID, db: DbSession, actor: Participant):
 @router.post("/{request_id}/cancel", response_model=PurchaseRequestOut)
 def cancel_request(request_id: uuid.UUID, db: DbSession, actor: Participant):
     request = service.cancel_request(db, actor, request_id)
+    db.commit()
+    return _present(actor, request, db)
+
+
+@router.post("/{request_id}/suppliers/{supplier_user_id}/cancel", response_model=PurchaseRequestOut)
+def cancel_supplier(request_id: uuid.UUID, supplier_user_id: uuid.UUID, db: DbSession, actor: Participant):
+    request = service.cancel_supplier(db, actor, request_id, supplier_user_id)
     db.commit()
     return _present(actor, request, db)

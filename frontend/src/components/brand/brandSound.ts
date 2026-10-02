@@ -46,16 +46,50 @@ async function decode(url: string, audio: AudioContext) {
 }
 
 function prepare() {
+  if (context && tickBuffers && accentBuffer) return Promise.resolve();
   if (!preparing) {
     preparing = (async () => {
-      const audio = new AudioContext();
-      context = audio;
-      if (audio.state === "suspended") await audio.resume().catch(() => undefined);
-      tickBuffers = await Promise.all(TICKS.map((url) => decode(url, audio)));
-      accentBuffer = await decode(accentUrl, audio);
-    })().catch(() => undefined);
+      try {
+        const audio = context ?? new AudioContext();
+        context = audio;
+        if (audio.state === "suspended") await audio.resume().catch(() => undefined);
+        tickBuffers = await Promise.all(TICKS.map((url) => decode(url, audio)));
+        accentBuffer = await decode(accentUrl, audio);
+      } catch {
+        preparing = null;
+      }
+    })();
   }
   return preparing;
+}
+
+/** Call from the Sign In click, before any await, so the browser accepts resume(). */
+export function primeBrandSound() {
+  preloadOneShots();
+  const audio = context ?? new AudioContext();
+  context = audio;
+  if (audio.state !== "running") void audio.resume().catch(() => undefined);
+  void prepare().then(wake);
+}
+
+function wake() {
+  if (!context || context.state !== "running" || !tickBuffers?.[0]) return;
+  const gain = context.createGain();
+  gain.gain.value = 0.0001;
+  const source = context.createBufferSource();
+  source.buffer = tickBuffers[0];
+  source.connect(gain);
+  gain.connect(context.destination);
+  try {
+    source.start();
+  } catch {
+    /* The intro still starts if the device will not wake. */
+  }
+}
+
+async function ensureRunning() {
+  await prepare();
+  if (context && context.state === "suspended") await context.resume().catch(() => undefined);
 }
 
 function play(src: string, level: number) {
@@ -92,7 +126,7 @@ export function bindBrandSound(): BrandSound {
   const token = Symbol("brand-sound");
   active = token;
   preloadOneShots();
-  const preparing = prepare();
+  const preparing = ensureRunning();
   const voices: AudioBufferSourceNode[] = [];
   const timers: number[] = [];
   let lettersQueued = false;

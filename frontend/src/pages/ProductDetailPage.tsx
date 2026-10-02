@@ -6,7 +6,6 @@ import { paths } from "../app/paths";
 import { AsyncContent } from "../components/feedback/AsyncContent";
 import { EmptyState } from "../components/feedback/EmptyState";
 import { Price } from "../components/market/Price";
-import { OfferModal } from "../components/negotiation/OfferModal";
 import { LandedCostPreviewModal } from "../components/product/LandedCostPreviewModal";
 import { ProductCard } from "../components/product/ProductCard";
 import { ProductVisual } from "../components/product/ProductVisual";
@@ -17,6 +16,7 @@ import { getErrorMessage } from "../lib/api/client";
 import { getMaterialEstimate, type BenchmarkSummary } from "../lib/api/pricing";
 import { listProductListings, listSupplierMatches } from "../lib/api/listings";
 import { startNegotiation } from "../lib/api/negotiations";
+import { isPlacedOrder, placeAtAsking } from "../lib/api/orders";
 import { getProduct, listProducts, selectPricing } from "../lib/api/products";
 import { answerProductQuestion, askProductQuestion, downloadProductDocument, listProductDocuments, listProductQuestions } from "../lib/api/productContent";
 import { useApiQuery } from "../lib/api/useApiQuery";
@@ -70,7 +70,10 @@ export function ProductDetailPage() {
   const [destinationPin, setDestinationPin] = useState(readDeliveryPin);
   useEffect(() => onDeliveryPinChange(() => setDestinationPin(readDeliveryPin())), []);
   const [calculatorOpen, setCalculatorOpen] = useState(false);
-  const [negotiateOpen, setNegotiateOpen] = useState(false);
+  const [offerPrice, setOfferPrice] = useState("");
+  const [priceDirty, setPriceDirty] = useState(false);
+  const [busySupplier, setBusySupplier] = useState<string | null>(null);
+  const [tradeError, setTradeError] = useState<string | null>(null);
   const [tab, setTab] = useState<"specifications" | "supply" | "documents" | "questions">("specifications");
   const [question, setQuestion] = useState("");
   const [replies, setReplies] = useState<Record<string, string>>({});
@@ -106,6 +109,15 @@ export function ProductDetailPage() {
     }, signal),
   );
   const matched = supplierMatches.data?.matches ?? [];
+  const several = offers.length > 1;
+  const baseline = several ? (benchmark?.current?.value.amount ?? "") : (offers[0]?.askingPrice ?? "");
+  useEffect(() => {
+    setPriceDirty(false);
+    setOfferPrice("");
+  }, [sku]);
+  useEffect(() => {
+    if (!priceDirty && baseline) setOfferPrice(baseline);
+  }, [baseline, priceDirty]);
   const moq = offers.length ? `${Number(Math.min(...offers.map((offer) => Number(offer.minimumQuantity)))).toLocaleString("en-IN")} ${product?.uom.code.toLowerCase()}` : "—";
   const documents = useApiQuery(product ? `documents:${product.productCode}` : null, (signal) => listProductDocuments(product?.productCode ?? "", signal));
   const questionList = useApiQuery(product ? `questions:${product.productCode}` : null, (signal) => listProductQuestions(product?.productCode ?? "", signal));
@@ -140,14 +152,58 @@ export function ProductDetailPage() {
                 <div className="quantity-field"><label>Required quantity</label><div><Button variant="ghost" onClick={() => setQuantity(Math.max(500, quantity - 500))}><Minus size={16} /></Button><Input value={quantity} onChange={(e) => setQuantity(Number(e.target.value))} /><span>{product.uom.code}</span><Button variant="ghost" onClick={() => setQuantity(quantity + 500)}><Plus size={16} /></Button></div></div>
                 <div className="delivery-field"><label>Delivery PIN</label><div><MapPin size={17} /><Input value={destinationPin} onChange={(event) => setDestinationPin(event.target.value)} /></div></div>
                 <EstimateSummary benchmark={benchmark} quantity={quantity} averaged={offers.length > 0} />
+                {offers.length > 0 && (
+                  <label className="quantity-field">{several ? "Average price" : "Asking price"}
+                    <Input inputMode="decimal" aria-label={several ? "Average price" : "Asking price"} value={offerPrice} onChange={(event) => { setPriceDirty(true); setOfferPrice(event.target.value); }} />
+                  </label>
+                )}
+                <p className="order-note">{several ? "Leave the average to order at each supplier’s asking price where stock allows. Change it and a supplier above that price is a negotiation." : "Leave the asking price to place the order where stock allows. Change it to negotiate."}</p>
+                {tradeError && <p className="negative">{tradeError}</p>}
                 <Button onClick={() => setCalculatorOpen(true)}>Calculate landed cost <ArrowRight size={17} /></Button>
-                <Button variant="secondary" disabled={offers.length === 0} title={offers.length === 0 ? "No supplier is listing this product" : undefined} onClick={() => setNegotiateOpen(true)}>Request negotiated rate</Button>
-                <Button variant="secondary" onClick={() => navigate(`${paths.purchaseRequests}?product=${encodeURIComponent(product.productCode)}&quantity=${encodeURIComponent(String(quantity))}&pin=${encodeURIComponent(destinationPin)}`)}>Create purchase request</Button>
+                <Button variant="secondary" onClick={() => navigate(`${paths.purchaseRequests}?product=${encodeURIComponent(product.productCode)}&quantity=${encodeURIComponent(String(quantity))}&pin=${encodeURIComponent(destinationPin)}&price=${encodeURIComponent(offerPrice)}`)}>Create purchase request</Button>
               </div>
               <div className="assurance-row"><span><ShieldCheck size={18} /><strong>{product.listingCount} {product.listingCount === 1 ? "supplier" : "suppliers"}</strong><small>Active listings</small></span><span><Truck size={18} /><strong>{product.availability === "available" ? "Benchmark live" : "Rate on request"}</strong><small>{benchmark?.current ? `As of ${formatDate(benchmark.current.freshness.asOfDate)}` : "No current benchmark"}</small></span><span><ReceiptText size={18} /><strong>{offers.length ? "Listed" : "No listing"}</strong><small>{offers.length ? `${offers.length} eligible in this currency` : "No supplier is listing this product"}</small></span></div>
             </section>
             <div className="product-wide">
-              {matched.length > 0 && <SupplierComparison matches={matched} pin={debouncedPin} quantity={debouncedQuantity} uom={product.uom.code} onAsk={(supplierUserId) => navigate(`${paths.purchaseRequests}?product=${encodeURIComponent(product.productCode)}&quantity=${encodeURIComponent(String(quantity))}&pin=${encodeURIComponent(destinationPin)}&supplier=${encodeURIComponent(supplierUserId)}`)} />}
+              {matched.length > 0 && <SupplierComparison
+                matches={matched}
+                pin={debouncedPin}
+                quantity={debouncedQuantity}
+                uom={product.uom.code}
+                buyerPrice={offerPrice}
+                baseline={baseline}
+                several={several}
+                busySupplier={busySupplier}
+                onAsk={(supplierUserId) => navigate(`${paths.purchaseRequests}?product=${encodeURIComponent(product.productCode)}&quantity=${encodeURIComponent(String(quantity))}&pin=${encodeURIComponent(destinationPin)}&price=${encodeURIComponent(offerPrice)}&supplier=${encodeURIComponent(supplierUserId)}`)}
+                onPlace={(supplierUserId) => {
+                  setBusySupplier(supplierUserId);
+                  setTradeError(null);
+                  void placeAtAsking({
+                    productCode: product.productCode,
+                    supplierUserId,
+                    quantity: String(quantity),
+                    destinationPin,
+                  }).then((result) => {
+                    if (isPlacedOrder(result)) navigate(`${paths.orders}?id=${encodeURIComponent(result.id)}`);
+                    else setTradeError("Submitted for approval. No order exists until someone else in the company approves the material total.");
+                  }).catch((cause) => setTradeError(getErrorMessage(cause))).finally(() => setBusySupplier(null));
+                }}
+                onNegotiate={(supplierUserId, offeredPrice) => {
+                  setBusySupplier(supplierUserId);
+                  setTradeError(null);
+                  void startNegotiation({
+                    productCode: product.productCode,
+                    supplierUserId,
+                    quantity: String(quantity),
+                    offeredPrice,
+                    destinationPin,
+                    seriesCode: benchmark?.seriesCode,
+                    currency: benchmark ? undefined : "INR",
+                  }).then((negotiation) => {
+                    navigate(`${paths.negotiations}?id=${encodeURIComponent(negotiation.id)}`);
+                  }).catch((cause) => setTradeError(getErrorMessage(cause))).finally(() => setBusySupplier(null));
+                }}
+              />}
               <div className="rate-module">
                 <small>PLENZA BENCHMARK {stale ? <Badge tone="warning">STALE</Badge> : benchmark?.current && <span className="live-dot" />}</small>
                 <div className="rate-module__row">
@@ -203,33 +259,6 @@ export function ProductDetailPage() {
             </AsyncContent>
           </section>
         </>
-      )}
-      {negotiateOpen && product && (
-        <OfferModal
-          title="Start negotiation"
-          productName={product.name}
-          context={benchmark?.current
-            ? `Plenza benchmark (reference): ${formatMoney(benchmark.current.value)} / ${benchmark.unit.label} · ${benchmark.market.label} · As of ${formatDate(benchmark.current.freshness.asOfDate)}`
-            : "No valid Plenza benchmark · Rate on request"}
-          currency={benchmark?.currency ?? "INR"}
-          uom={product.uom.code}
-          initialQuantity={String(quantity)}
-          submitLabel="Submit offer"
-          suppliers={offers}
-          productCode={product.productCode}
-          initialPin={destinationPin}
-          onClose={() => setNegotiateOpen(false)}
-          onSubmit={async (input) => {
-            const negotiation = await startNegotiation({
-              ...input,
-              supplierUserId: input.supplierUserId,
-              productCode: product.productCode,
-              seriesCode: benchmark?.seriesCode,
-              currency: benchmark ? undefined : "INR",
-            });
-            navigate(`${paths.negotiations}?id=${encodeURIComponent(negotiation.id)}`);
-          }}
-        />
       )}
       <LandedCostPreviewModal
         open={calculatorOpen}

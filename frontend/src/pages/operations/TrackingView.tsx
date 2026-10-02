@@ -8,7 +8,7 @@ import { Button, Heading, Input } from "../../components/ui";
 import { ApiError, getErrorMessage } from "../../lib/api/client";
 import { changeOrderStatus, downloadOrderDocument, getOrderTracking, listOrders, saveShipment, type OrderTracking, type ShipmentDetails } from "../../lib/api/orders";
 import { useApiQuery } from "../../lib/api/useApiQuery";
-import { formatDate, formatDateTime, titleCase } from "../../lib/pricingFormat";
+import { formatDate, formatDateTime, formatMoney, titleCase } from "../../lib/pricingFormat";
 import { OrderStatusBadge } from "./OrdersWorkspace";
 
 function milestone(tracking: OrderTracking, status: "dispatched" | "delivered", pending: string) {
@@ -136,11 +136,41 @@ export function TrackingView() {
 
   return (
     <AsyncContent isLoading={(orders.isLoading && !list.length) || (tracking.isLoading && !data)} error={orders.error ?? tracking.error} onRetry={refresh} isEmpty={!orders.isLoading && !list.length} emptyTitle="No orders to track" emptyMessage="Orders appear here once they are placed from an accepted negotiation." loadingLabel="Loading tracking…">
-      {list.length > 1 && (
-        <div className="chip-row">
-          {list.map((order) => <Button key={order.id} variant="ghost" className={`filter-chip ${order.id === selected?.id ? "is-active" : ""}`} onClick={() => setSearchParams({ id: order.id })}>{order.orderNumber} · {titleCase(order.status)}</Button>)}
+      <section className="section-block data-section">
+        <div className="market-table-wrap">
+          <table className="market-table tracking-orders">
+            <thead>
+              <tr>
+                <th>Order</th>
+                <th>Product</th>
+                <th>Quantity</th>
+                <th>Counterparty</th>
+                <th>Destination</th>
+                <th>Payable estimate</th>
+                <th>Status</th>
+                <th>Updated</th>
+              </tr>
+            </thead>
+            <tbody>
+              {list.map((order) => {
+                const party = order.viewerRole === "buyer" ? order.supplier : order.buyer;
+                return (
+                  <tr key={order.id} className={order.id === selected?.id ? "is-selected" : undefined} onClick={() => setSearchParams({ id: order.id })}>
+                    <td><strong>{order.orderNumber}</strong><small>{order.negotiation.negotiationNumber}</small></td>
+                    <td><strong>{order.product.name}</strong><small>{order.product.productCode}</small></td>
+                    <td>{Number(order.quantity).toLocaleString("en-IN")} {order.uom.toLowerCase()}</td>
+                    <td><strong><OrgLink organisationId={party.organisationId}>{party.organisation}</OrgLink></strong><small>{party.name}</small></td>
+                    <td>{order.destinationPin ?? "—"}</td>
+                    <td>{formatMoney(order.charges.payable, 2)}</td>
+                    <td><OrderStatusBadge status={order.status} /></td>
+                    <td>{formatDate(order.updatedAt)}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
-      )}
+      </section>
       {data && (
         <div className="tracking-layout">
           <section className="tracking-map"><div className="map-grid"/><div className="route-path"><i className="origin"/><span/><Truck size={24}/><span/><i className="destination"/></div><div className="map-location map-location--a"><strong><OrgLink organisationId={data.supplier.organisationId}>{data.supplier.organisation}</OrgLink></strong><small>{milestone(data, "dispatched", "Not dispatched yet")}</small></div><div className="map-location map-location--b"><strong>{data.buyer.organisation}</strong><small>{milestone(data, "delivered", "Awaiting delivery")}</small></div></section>

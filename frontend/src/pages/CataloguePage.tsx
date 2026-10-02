@@ -1,4 +1,4 @@
-import { ChevronDown, FileText, SearchX, SlidersHorizontal } from "lucide-react";
+import { ChevronDown, SearchX, SlidersHorizontal } from "lucide-react";
 import { useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { paths } from "../app/paths";
@@ -24,6 +24,26 @@ function toggle(current: string[], value: string) {
   return current.includes(value) ? current.filter((item) => item !== value) : [...current, value];
 }
 
+function marketCounts(products: Product[]) {
+  const totals = new Map<string, { label: string; count: number }>();
+  for (const product of products) {
+    const seen = new Set<string>();
+    for (const pricing of product.pricing) {
+      if (seen.has(pricing.market.code)) continue;
+      seen.add(pricing.market.code);
+      const current = totals.get(pricing.market.code);
+      totals.set(pricing.market.code, { label: pricing.market.label, count: (current?.count ?? 0) + 1 });
+    }
+  }
+  return [...totals.entries()].sort(([, left], [, right]) => left.label.localeCompare(right.label));
+}
+
+const SORTS = [
+  { key: "name", label: "Name" },
+  { key: "category", label: "Category" },
+  { key: "code", label: "Product code" },
+] as const;
+
 export function CataloguePage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -34,23 +54,34 @@ export function CataloguePage() {
   const [pickedCategories, setPickedCategories] = useState<string[] | null>(null);
   const [subcategories, setSubcategories] = useState<string[]>([]);
   const [availability, setAvailability] = useState<string[]>([]);
+  const [markets, setMarkets] = useState<string[]>([]);
+  const [filtersOpen, setFiltersOpen] = useState(() => window.matchMedia("(min-width: 641px)").matches);
+  const [sortIndex, setSortIndex] = useState(0);
   const selectedCategories = pickedCategories ?? (categoryFromUrl ? [categoryFromUrl] : []);
   const categories = counts(products, (product) => product.category);
   const subcategoryOptions = counts(products, (product) =>
     selectedCategories.length === 0 || selectedCategories.includes(product.category) ? product.subcategory : null,
   );
   const availabilityOptions = counts(products, (product) => product.availability);
-  const activeFilters = selectedCategories.length + subcategories.length + availability.length;
+  const marketOptions = marketCounts(products);
+  const activeFilters = selectedCategories.length + subcategories.length + availability.length + markets.length;
+  const sort = SORTS[sortIndex] ?? SORTS[0];
   const filtered = products.filter((product) => {
     if (selectedCategories.length > 0 && !selectedCategories.includes(product.category)) return false;
     if (subcategories.length > 0 && !subcategories.includes(product.subcategory ?? "")) return false;
     if (availability.length > 0 && !availability.includes(product.availability)) return false;
+    if (markets.length > 0 && !product.pricing.some((pricing) => markets.includes(pricing.market.code))) return false;
     if (!search) return true;
     const haystack = [product.name, product.category, product.subcategory ?? "", product.productCode, product.description ?? "", ...product.pricing.map((pricing) => pricing.market.label)]
       .join(" ")
       .toLowerCase();
     return haystack.includes(search.toLowerCase());
-  }).sort((left, right) => left.name.localeCompare(right.name) || left.productCode.localeCompare(right.productCode));
+  }).sort((left, right) => {
+    const byName = left.name.localeCompare(right.name) || left.productCode.localeCompare(right.productCode);
+    if (sort.key === "category") return left.category.localeCompare(right.category) || byName;
+    if (sort.key === "code") return left.productCode.localeCompare(right.productCode);
+    return byName;
+  });
 
   const chooseCategory = (category: string | null) => {
     setPickedCategories(category ? [category] : []);
@@ -61,7 +92,6 @@ export function CataloguePage() {
     <div className="page">
       <div className="page-heading">
         <div><small>{isLoading && products.length === 0 ? "LOADING CATALOGUE" : `${products.length} ACTIVE ITEMS`}</small><Heading level={1}>Industrial item master</Heading><p>Standardized specifications, live supply and auditable market rates.</p></div>
-        <Button variant="secondary" aria-disabled="true" title="BOM upload is not part of the Plenza catalogue."><FileText size={17} /> Upload BOM</Button>
       </div>
       <AsyncContent isLoading={isLoading && products.length === 0} error={error} onRetry={reload} loadingLabel="Loading catalogue…">
         <div className="catalogue-toolbar">
@@ -71,10 +101,10 @@ export function CataloguePage() {
               <Button key={category} variant="ghost" className={`filter-chip${selectedCategories.length === 1 && selectedCategories[0] === category ? " is-active" : ""}`} onClick={() => chooseCategory(category)}>{titleCase(category)}</Button>
             ))}
           </div>
-          <Button variant="secondary" aria-disabled="true" title="Use the category, subcategory and availability filters."><SlidersHorizontal size={16} /> Filters {activeFilters > 0 && <Badge>{activeFilters}</Badge>}</Button>
+          <Button variant="secondary" aria-expanded={filtersOpen} onClick={() => setFiltersOpen((open) => !open)}><SlidersHorizontal size={16} /> Filters {activeFilters > 0 && <Badge>{activeFilters}</Badge>}</Button>
         </div>
-        <div className="catalogue-layout">
-          <aside className="filter-panel">
+        <div className={`catalogue-layout${filtersOpen ? "" : " is-filters-closed"}`}>
+          <aside className={`filter-panel${filtersOpen ? " is-open" : ""}`}>
             <div><strong>Category</strong><ChevronDown size={16} /></div>
             {categories.map(([category, count]) => (
               <Checkbox key={category} label={titleCase(category)} count={count} checked={selectedCategories.includes(category)} onChange={() => { setPickedCategories(toggle(selectedCategories, category)); setSubcategories([]); }} />
@@ -90,10 +120,12 @@ export function CataloguePage() {
             <div><strong>Certification</strong><ChevronDown size={16} /></div>
             <p className="filter-note">Not specified</p>
             <div><strong>Dispatch market</strong><ChevronDown size={16} /></div>
-            <p className="filter-note">Not specified</p>
+            {marketOptions.length === 0 ? <p className="filter-note">Not specified</p> : marketOptions.map(([code, marketOption]) => (
+              <Checkbox key={code} label={marketOption.label} count={marketOption.count} checked={markets.includes(code)} onChange={() => setMarkets(toggle(markets, code))} />
+            ))}
           </aside>
           <section>
-            <div className="result-meta"><span><strong>{filtered.length}</strong> matching items</span><Button variant="ghost" aria-disabled="true" title="Items are listed by product name.">Sort: Name <ChevronDown size={15} /></Button></div>
+            <div className="result-meta"><span><strong>{filtered.length}</strong> matching items</span><Button variant="ghost" onClick={() => setSortIndex((index) => (index + 1) % SORTS.length)}>Sort: {sort.label} <ChevronDown size={15} /></Button></div>
             {filtered.length > 0 ? (
               <div className="catalogue-grid">
                 {filtered.map((product) => <ProductCard key={product.productCode} product={product} market={market} onOpen={() => navigate(paths.productDetail(product.productCode) + (market ? `?market=${encodeURIComponent(market)}` : ""))} />)}

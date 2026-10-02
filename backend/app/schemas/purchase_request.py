@@ -18,6 +18,7 @@ class PurchaseRequestIn(ApiModel):
     required_by: date | None = None
     payment_terms: str | None = Field(default=None, max_length=120)
     message: str | None = Field(default=None, max_length=2000)
+    offered_price: Decimal | None = Field(default=None, gt=0, max_digits=18, decimal_places=4)
     supplier_user_ids: list[uuid.UUID] = []
 
 
@@ -65,6 +66,7 @@ class PurchaseRequestOut(ApiModel):
     payment_terms: str | None
     requirements: list[RequirementOut] | None
     message: str | None
+    offered_price: str | None
     buyer_name: str
     buyer_organisation: str
     viewer_role: Literal["buyer", "supplier"]

@@ -100,7 +100,7 @@ def test_spread_needs_two_asks_and_a_withdrawn_listing_adds_no_point(client, wor
     world.session.flush()
     assert client.post("/api/v1/listings", json={
         "productCode": product.product_code, "minimumQuantity": "100", "askingPrice": "80.0000",
-        "currency": "INR", "availability": "in_stock",
+        "currency": "INR", "availability": "in_stock", "maximumQuantity": "20000",
     }, headers=as_actor(other)).status_code == 201
     two = client.get(f"/api/v1/products/{product.product_code}", headers=buyer).json()["pricing"][0]
     assert two["current"]["value"]["amount"] == "90.0000"

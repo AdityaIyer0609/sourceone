@@ -26,7 +26,7 @@ function ListingRow({ listing, onSaved }: { listing: SupplierListing; onSaved: (
       await updateListing(listing.id, {
         askingPrice: price,
         minimumQuantity: minimum,
-        maximumQuantity: availability === "limited" ? maximum : null,
+        maximumQuantity: availability === "on_request" ? null : maximum,
         availability,
         isActive: active,
       });
@@ -43,9 +43,9 @@ function ListingRow({ listing, onSaved }: { listing: SupplierListing; onSaved: (
       <td><Input aria-label={`Asking price for ${listing.productCode}`} value={price} onChange={(event) => setPrice(event.target.value)} /></td>
       <td><Input aria-label={`Minimum quantity for ${listing.productCode}`} value={minimum} onChange={(event) => setMinimum(event.target.value)} /></td>
       <td>
-        {availability === "limited"
-          ? <Input aria-label={`Available quantity for ${listing.productCode}`} value={maximum} onChange={(event) => setMaximum(event.target.value)} />
-          : <small>—</small>}
+        {availability === "on_request"
+          ? <small>—</small>
+          : <Input aria-label={`Available quantity for ${listing.productCode}`} value={maximum} onChange={(event) => setMaximum(event.target.value)} />}
       </td>
       <td>
         <select className="input" aria-label={`Availability for ${listing.productCode}`} value={availability} onChange={(event) => setAvailability(event.target.value as ListingAvailability)}>
@@ -55,7 +55,7 @@ function ListingRow({ listing, onSaved }: { listing: SupplierListing; onSaved: (
       <td>{formatMoney(listing.askingPrice, 4)} / {listing.uom.toLowerCase()}</td>
       <td><Button variant="ghost" onClick={() => setActive((value) => !value)}>{active ? "Active" : "Inactive"}</Button></td>
       <td>
-        <Button disabled={busy || (availability === "limited" && !(Number(maximum) >= Number(minimum) && Number(maximum) > 0))} onClick={() => void save()}>Save</Button>
+        <Button disabled={busy || (availability !== "on_request" && !(Number(maximum) >= Number(minimum) && Number(maximum) > 0))} onClick={() => void save()}>Save</Button>
         {error ? <small className="negative">{getErrorMessage(error)}{error instanceof ApiError && error.code ? ` (${error.code})` : ""}</small> : null}
       </td>
     </tr>
@@ -80,7 +80,7 @@ function CatalogueOffer({ product, onListed }: { product: Product; onListed: () 
         askingPrice: price,
         currency,
         minimumQuantity: minimum,
-        maximumQuantity: availability === "limited" ? maximum : null,
+        maximumQuantity: availability === "on_request" ? null : maximum,
         availability,
       });
       onListed();
@@ -112,8 +112,8 @@ function CatalogueOffer({ product, onListed }: { product: Product; onListed: () 
           </select>
         </label>
         <label>Minimum quantity<Input aria-label={`Minimum quantity for ${product.productCode}`} value={minimum} onChange={(event) => setMinimum(event.target.value)} /></label>
-        {availability === "limited" && (
-          <label>Available up to<Input aria-label={`Available quantity for ${product.productCode}`} value={maximum} onChange={(event) => setMaximum(event.target.value)} /></label>
+        {availability !== "on_request" && (
+          <label>Available quantity<Input aria-label={`Available quantity for ${product.productCode}`} value={maximum} onChange={(event) => setMaximum(event.target.value)} /></label>
         )}
         <label>Availability
           <select className="field-select" aria-label={`Availability for ${product.productCode}`} value={availability} onChange={(event) => setAvailability(event.target.value as ListingAvailability)}>
@@ -121,7 +121,7 @@ function CatalogueOffer({ product, onListed }: { product: Product; onListed: () 
           </select>
         </label>
         <div className="submission-decision__actions">
-          <Button disabled={busy || !(Number(price) > 0) || !(Number(minimum) > 0) || (availability === "limited" && !(Number(maximum) >= Number(minimum) && Number(maximum) > 0))} onClick={() => void list()}>{busy ? "Saving…" : "List this product"}</Button>
+          <Button disabled={busy || !(Number(price) > 0) || !(Number(minimum) > 0) || (availability !== "on_request" && !(Number(maximum) >= Number(minimum) && Number(maximum) > 0))} onClick={() => void list()}>{busy ? "Saving…" : "List this product"}</Button>
         </div>
         {error ? <p className="negative">{error}</p> : null}
       </div>
@@ -151,7 +151,7 @@ export function ListingsWorkspace() {
     <section className="section-block data-section" style={{ marginBottom: 16 }}>
       <div className="step-label" style={{ padding: "16px 18px 0" }}><span>01</span><div><strong>Your listings</strong><small>Saving a price updates this offer. It does not change the catalogue specifications or publish a benchmark.</small></div></div>
       <AsyncContent isLoading={listings.isLoading && !listings.data} error={listings.error} onRetry={listings.reload} isEmpty={Boolean(listings.data) && rows.length === 0} emptyTitle="No listings yet" emptyMessage="Choose a catalogue product below and set your asking price." loadingLabel="Loading listings…">
-        <div className="market-table-wrap"><table className="market-table"><thead><tr><th>Product</th><th>Asking price</th><th>Minimum</th><th>Available up to</th><th>Availability</th><th>Current</th><th>Shown</th><th/></tr></thead><tbody>
+        <div className="market-table-wrap"><table className="market-table"><thead><tr><th>Product</th><th>Asking price</th><th>Minimum</th><th>Available quantity</th><th>Availability</th><th>Current</th><th>Shown</th><th/></tr></thead><tbody>
           {rows.map((listing) => <ListingRow key={`${listing.id}:${listing.askingPrice.amount}:${listing.isActive}`} listing={listing} onSaved={listings.reload} />)}
         </tbody></table></div>
       </AsyncContent>

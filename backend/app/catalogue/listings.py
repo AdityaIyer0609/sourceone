@@ -17,22 +17,19 @@ from app.pricing.constants import SUPPORTED_CURRENCIES
 
 
 def resolve_maximum(availability: str, minimum: Decimal, maximum: Decimal | None) -> Decimal | None:
-    """A limited listing must say how much the supplier can spare. Other listings have no cap."""
-    if availability == "limited":
-        if maximum is None or maximum <= 0:
-            raise ValidationFailed(
-                "A limited listing needs the quantity this supplier can spare",
-                details={"field": "maximumQuantity"},
-            )
-        if maximum < minimum:
-            raise ValidationFailed(
-                "The available quantity must be at least the minimum",
-                details={"field": "maximumQuantity"},
-            )
-        return maximum
-    if maximum is not None:
-        raise ValidationFailed("Only a limited listing has a maximum quantity", details={"field": "maximumQuantity"})
-    return None
+    """In stock and limited listings carry a sellable quantity. On request does not."""
+    if availability == "on_request":
+        if maximum is not None:
+            raise ValidationFailed("An on-request listing has no stock quantity", details={"field": "maximumQuantity"})
+        return None
+    if maximum is None or maximum <= 0:
+        raise ValidationFailed("Enter the quantity available to sell", details={"field": "maximumQuantity"})
+    if maximum < minimum:
+        raise ValidationFailed(
+            "The available quantity must be at least the minimum",
+            details={"field": "maximumQuantity"},
+        )
+    return maximum
 
 
 def supply_note(listing: SupplierListing, quantity: Decimal) -> str | None:
@@ -154,9 +151,9 @@ def update_listing(
     cap = listing.maximum_quantity
     if maximum_set or availability is not None or minimum_quantity is not None:
         chosen = maximum_quantity if maximum_set else listing.maximum_quantity
-        if next_availability != "limited":
+        if next_availability == "on_request":
             if maximum_set and maximum_quantity is not None:
-                raise ValidationFailed("Only a limited listing has a maximum quantity", details={"field": "maximumQuantity"})
+                raise ValidationFailed("An on-request listing has no stock quantity", details={"field": "maximumQuantity"})
             chosen = None
         cap = resolve_maximum(next_availability, next_minimum, chosen)
     market_changed = False
@@ -181,6 +178,31 @@ def update_listing(
 
 def set_listing_active(session: Session, actor: Actor, listing_id: uuid.UUID, *, is_active: bool) -> SupplierListing:
     return update_listing(session, actor, listing_id, is_active=is_active)
+
+
+def take_stock(session: Session, supplier_user_id: uuid.UUID, product_id: uuid.UUID, quantity: Decimal) -> None:
+    """Reduce the supplier's sellable quantity when an order is created. On request has nothing to reduce."""
+    listing = session.scalar(
+        select(SupplierListing)
+        .where(SupplierListing.supplier_user_id == supplier_user_id, SupplierListing.product_id == product_id)
+        .with_for_update()
+    )
+    if listing is None or listing.availability == "on_request" or listing.maximum_quantity is None:
+        return
+    if quantity > listing.maximum_quantity:
+        raise ValidationFailed(
+            "This supplier does not have that much left",
+            details={"available": f"{listing.maximum_quantity.normalize():f}", "quantity": f"{quantity.normalize():f}"},
+        )
+    remaining = listing.maximum_quantity - quantity
+    if remaining == 0:
+        listing.availability = "on_request"
+        listing.maximum_quantity = None
+    else:
+        listing.maximum_quantity = remaining
+        if remaining < listing.minimum_quantity:
+            listing.minimum_quantity = remaining
+    session.flush()
 
 
 def can_supply(session: Session, user: User) -> bool:

@@ -38,6 +38,14 @@ class CreateOrderIn(ApiModel):
     freight_basis: Literal["standard", "distance"] = "standard"
 
 
+class PlaceAtAskingIn(ApiModel):
+    product_code: str = Field(min_length=1, max_length=64)
+    supplier_user_id: uuid.UUID
+    quantity: Decimal = Field(gt=0, max_digits=18, decimal_places=3)
+    destination_pin: str = Field(min_length=6, max_length=6)
+    freight_basis: Literal["standard", "distance"] = "standard"
+
+
 class OrderDocumentOut(ApiModel):
     id: uuid.UUID
     document_type: str

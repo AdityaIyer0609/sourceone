@@ -102,6 +102,14 @@ export const listOrders = (signal?: AbortSignal) => apiClient.get<Order[]>(BASE,
 
 export const getOrder = (id: string, signal?: AbortSignal) => apiClient.get<Order>(`${BASE}/${id}`, { signal })
 
+export const placeAtAsking = (body: {
+  productCode: string
+  supplierUserId: string
+  quantity: string
+  destinationPin: string
+  freightBasis?: 'standard' | 'distance'
+}) => apiClient.post<Order | OrderApproval>(`${BASE}/from-listing`, body)
+
 export const createOrderFromNegotiation = (
   negotiationId: string,
   body: { destinationPin: string; freightBasis: 'standard' | 'distance' },

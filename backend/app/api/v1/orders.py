@@ -18,6 +18,7 @@ from app.schemas.order import (
     AgreedPriceOut,
     CancelOrderIn,
     CreateOrderIn,
+    PlaceAtAskingIn,
     NegotiationRefOut,
     OrderActionsOut,
     DocumentReviewIn,
@@ -171,6 +172,20 @@ def _present(actor: Actor, order: Order) -> OrderOut:
             for document in documents.visible_documents(order)
         ],
     )
+
+
+@router.post("/from-listing", response_model=None, status_code=201)
+def place_at_asking(body: PlaceAtAskingIn, db: DbSession, actor: Participant):
+    result = service.place_at_asking_price(
+        db, actor, product_code=body.product_code, supplier_user_id=body.supplier_user_id, quantity=body.quantity,
+        destination_pin=body.destination_pin, freight_basis=body.freight_basis,
+    )
+    db.commit()
+    if isinstance(result, OrderApproval):
+        from app.api.v1.approvals import _present as present_approval
+        return JSONResponse(status_code=202, content=present_approval(result).model_dump(mode="json", by_alias=True))
+    presented = _present(actor, service.get_order(db, actor, result.id))
+    return JSONResponse(status_code=201, content=presented.model_dump(mode="json", by_alias=True))
 
 
 @router.post("/from-negotiation/{negotiation_id}", response_model=None)

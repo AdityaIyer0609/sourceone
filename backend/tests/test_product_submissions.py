@@ -30,6 +30,7 @@ def _body(world, **overrides):
         "currency": "INR",
         "minimumQuantity": "500",
         "availability": "in_stock",
+        "maximumQuantity": "20000",
     }
     body.update(overrides)
     return body

@@ -189,6 +189,8 @@ h1, h2, h3, h4 { font-family: "Manrope", sans-serif; letter-spacing: -.035em; }
 .market-table td { border-bottom: 1px solid #edf0f1; line-height: 1.4; padding: 12px; }
 .market-table tbody tr { transition: background .15s ease; }
 .market-table tbody tr:hover { background: #fafbfb; }
+.market-table tbody tr.is-selected { background: var(--teal-soft); }
+.tracking-orders tbody tr { cursor: pointer; }
 .market-table td strong, .market-table td small { display: block; }
 .market-table td small { color: var(--subtle); font-size: 9px; line-height: 1.4; margin-top: 4px; }
 .market-table td .positive, .market-table td .negative { align-items: center; display: flex; font-weight: 700; }
@@ -226,6 +228,8 @@ h1, h2, h3, h4 { font-family: "Manrope", sans-serif; letter-spacing: -.035em; }
 .filter-chip { border: 1px solid var(--line); border-radius: 100px; flex: 0 0 auto; height: auto; line-height: 1.35; max-width: 100%; min-height: 36px; padding: 8px 14px; white-space: normal; }
 .filter-chip.is-active { background: var(--ink); border-color: var(--ink); color: #fff; }
 .catalogue-layout { display: grid; gap: 22px; grid-template-columns: 205px 1fr; }
+.catalogue-layout.is-filters-closed { grid-template-columns: 1fr; }
+.catalogue-layout.is-filters-closed .filter-panel { display: none; }
 .filter-panel { align-self: start; background: var(--surface); border: 1px solid var(--line); }
 .filter-panel > div { align-items: center; border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; padding: 16px 14px; }
 .filter-panel > div strong { font-size: 11px; }
@@ -610,6 +614,7 @@ h1, h2, h3, h4 { font-family: "Manrope", sans-serif; letter-spacing: -.035em; }
   .catalogue-toolbar > .button { flex-shrink: 0; }
   .catalogue-layout { display: block; }
   .filter-panel { display: none; }
+  .filter-panel.is-open { display: block; margin-bottom: 16px; }
   .product-gallery__main { height: 320px; }
   .product-visual--dark .material-shape { transform: scale(3.5); }
   .product-info h1 { font-size: 31px; }

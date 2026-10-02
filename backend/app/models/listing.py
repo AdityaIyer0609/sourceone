@@ -34,8 +34,8 @@ class SupplierListing(UUIDPrimaryKey, Timestamps, Base):
             name="maximum_covers_minimum",
         ),
         CheckConstraint(
-            "(availability = 'limited') = (maximum_quantity IS NOT NULL)",
-            name="limited_has_maximum",
+            "(availability = 'on_request') = (maximum_quantity IS NULL)",
+            name="stock_only_when_selling",
         ),
     )
 

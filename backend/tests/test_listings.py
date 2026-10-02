@@ -15,6 +15,8 @@ def _create(client, world, product, key="supplier", **extra):
         "productCode": product.product_code, "minimumQuantity": "500", "askingPrice": "100.2500",
         "currency": "INR", "availability": "in_stock", "isActive": True, **extra,
     }
+    if body["availability"] == "in_stock" and "maximumQuantity" not in body:
+        body["maximumQuantity"] = "20000"
     return client.post(LISTINGS, json=body, headers=as_user(world, key))
 
 
@@ -27,6 +29,7 @@ def test_supplier_creates_a_listing(client, world, product):
     assert body["uom"] == "KG" and body["minimumQuantity"] == "500"
     assert body["askingPrice"] == {"amount": "100.2500", "currency": "INR"}
     assert body["availability"] == "in_stock" and body["isActive"] is True
+    assert body["maximumQuantity"] == "20000"
     assert client.post(LISTINGS, json={
         "productCode": product.product_code, "minimumQuantity": "1", "askingPrice": "1",
         "currency": "INR", "availability": "in_stock",
@@ -97,24 +100,25 @@ def test_price_edit_updates_the_listing_and_the_average_not_a_benchmark(client, 
     assert client.get(LISTINGS, headers=as_user(world, "buyer")).status_code == 403
 
 
-def test_limited_cap_is_information_and_other_listings_have_none(client, world, product):
+def test_selling_listings_carry_stock_and_on_request_does_not(client, world, product):
     missing = _create(client, world, product, availability="limited")
     assert missing.status_code == 422
     created = _create(client, world, product, availability="limited", maximumQuantity="800")
     assert created.status_code == 201, created.text
     assert created.json()["maximumQuantity"] == "800"
-    rejected = client.patch(
+    stock = client.patch(
         f"{LISTINGS}/{created.json()['id']}",
         json={"availability": "in_stock", "maximumQuantity": "800"},
         headers=as_user(world, "supplier"),
     )
-    assert rejected.status_code == 422
-    stock = client.patch(
+    assert stock.status_code == 200, stock.text
+    assert stock.json()["maximumQuantity"] == "800"
+    cleared = client.patch(
         f"{LISTINGS}/{created.json()['id']}",
         json={"availability": "in_stock", "maximumQuantity": None},
         headers=as_user(world, "supplier"),
     )
-    assert stock.status_code == 200 and stock.json()["maximumQuantity"] is None
+    assert cleared.status_code == 422
     limited = client.patch(
         f"{LISTINGS}/{created.json()['id']}",
         json={"availability": "limited", "maximumQuantity": "800"},
@@ -131,3 +135,27 @@ def test_limited_cap_is_information_and_other_listings_have_none(client, world, 
     assert row["meetsMinimum"] is True
     assert row["maximumQuantity"] == "800"
     assert any("can spare" in reason for reason in row["reasons"])
+
+
+def test_direct_order_uses_the_asking_price_and_reduces_stock(client, world, product):
+    created = _create(client, world, product, maximumQuantity="1000").json()
+    placed = client.post("/api/v1/orders/from-listing", json={
+        "productCode": product.product_code,
+        "supplierUserId": str(world.users["supplier"].id),
+        "quantity": "600",
+        "destinationPin": "560001",
+    }, headers=as_user(world, "buyer"))
+    assert placed.status_code == 201, placed.text
+    body = placed.json()
+    assert body["agreedPrice"]["unitPrice"]["amount"] == "100.2500"
+    assert body["quantity"] == "600"
+    listing = client.get("/api/v1/listings", headers=as_user(world, "supplier")).json()
+    row = next(item for item in listing if item["id"] == created["id"])
+    assert row["maximumQuantity"] == "400"
+    again = client.post("/api/v1/orders/from-listing", json={
+        "productCode": product.product_code,
+        "supplierUserId": str(world.users["supplier"].id),
+        "quantity": "500",
+        "destinationPin": "560001",
+    }, headers=as_user(world, "buyer"))
+    assert again.status_code == 422

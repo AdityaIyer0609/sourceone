@@ -29,7 +29,7 @@ def test_new_supplier_has_no_invented_rates(client, world, product):
     org, user = _supplier_org(world)
     created = client.post("/api/v1/listings", json={
         "productCode": product.product_code, "minimumQuantity": "500", "askingPrice": "100.2500",
-        "currency": "INR", "availability": "in_stock",
+        "currency": "INR", "availability": "in_stock", "maximumQuantity": "20000",
     }, headers=as_actor(user))
     assert created.status_code == 201, created.text
 
@@ -65,7 +65,7 @@ def test_rates_use_real_negotiations_and_orders(client, world, product):
     org, user = _supplier_org(world, name="Kutch Resin")
     assert client.post("/api/v1/listings", json={
         "productCode": product.product_code, "minimumQuantity": "100", "askingPrice": "101.0000",
-        "currency": "INR", "availability": "limited", "maximumQuantity": "2000",
+        "currency": "INR", "availability": "limited", "maximumQuantity": "20000",
     }, headers=as_actor(user)).status_code == 201
     started = _start(client, world, product, price="101.0000", supplierUserId=str(user.id))
     assert started.status_code == 201, started.text

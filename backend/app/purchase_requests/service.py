@@ -139,6 +139,7 @@ def create_request(
     destination_pin: str,
     message: str | None,
     supplier_user_ids: list[uuid.UUID],
+    offered_price: Decimal | None = None,
     required_by: date | None = None,
     payment_terms: str | None = None,
     freight_basis: str = "standard",
@@ -171,6 +172,7 @@ def create_request(
         payment_terms=terms,
         requirements=requirement_snapshot(product),
         message=(message or "").strip() or None,
+        offered_price=offered_price,
         status=RequestStatus.DRAFT,
         created_at=now,
         updated_at=now,
@@ -221,7 +223,7 @@ def send_request(session: Session, actor: Actor, request_id: uuid.UUID) -> Purch
             quantity=request.quantity,
             series_code=series.code if series else None,
             currency=None if series else listing.currency,
-            offered_price=listing.asking_price,
+            offered_price=request.offered_price if request.offered_price is not None else listing.asking_price,
             supplier_user_id=row.supplier_user_id,
             message=request.message or f"Purchase request {request.request_number}.",
             destination_pin=request.destination_pin,
@@ -264,6 +266,43 @@ def cancel_request(session: Session, actor: Actor, request_id: uuid.UUID, *, now
     request.cancelled_at = now
     session.flush()
     return get_request(session, actor, request.id)
+
+
+def cancel_supplier(
+    session: Session, actor: Actor, request_id: uuid.UUID, supplier_user_id: uuid.UUID, *, now: datetime | None = None,
+) -> PurchaseRequest:
+    """Close one supplier's negotiation. The request stays open while another supplier is still in it."""
+    now = now or utcnow()
+    request = get_request(session, actor, request_id)
+    if request.buyer_user_id != actor.user_id:
+        raise PermissionDenied("Only the buyer can cancel a supplier on this request")
+    if request.status not in OPEN_FOR_CANCEL:
+        raise InvalidStateTransition(
+            f"A {request.status.replace('_', ' ')} purchase request cannot be cancelled",
+            details={"status": request.status},
+        )
+    row = next((item for item in request.suppliers if item.supplier_user_id == supplier_user_id), None)
+    if row is None:
+        raise NotFound("That supplier is not on this request")
+    if row.negotiation is None:
+        raise ValidationFailed("This supplier has not been sent a negotiation")
+    if row.negotiation.status == NegotiationStatus.ACCEPTED:
+        raise InvalidStateTransition(
+            "An accepted negotiation continues into the order flow and cannot be cancelled from the request",
+            details={"negotiationId": str(row.negotiation.id)},
+        )
+    if row.negotiation.status not in (NegotiationStatus.CANCELLED, NegotiationStatus.REJECTED):
+        negotiations.cancel_negotiation(
+            session, actor, row.negotiation.id, reason=f"Purchase request {request.request_number} cancelled for this supplier", now=now,
+        )
+    talks = [item.negotiation for item in request.suppliers if item.negotiation is not None]
+    still_open = [item for item in talks if item.status not in (NegotiationStatus.CANCELLED, NegotiationStatus.REJECTED)]
+    if talks and not still_open:
+        request.status = RequestStatus.CANCELLED
+        request.cancelled_at = now
+        session.flush()
+        return get_request(session, actor, request.id)
+    return sync_status(session, request)
 
 
 def freight_for(session: Session, request: PurchaseRequest, supplier_user_id: uuid.UUID) -> dict:

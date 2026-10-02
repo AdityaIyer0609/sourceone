@@ -1,9 +1,10 @@
 import { X } from "lucide-react";
+import { useEffect } from "react";
 import { NavLink } from "react-router-dom";
 import { accountNav, commerceNav, controlCentreNav, visibleNav, type NavItem } from "../../app/navigation";
 import { paths } from "../../app/paths";
 import { readSession } from "../../lib/api/auth";
-import { listNegotiations } from "../../lib/api/negotiations";
+import { listNegotiations, onNegotiationsChanged } from "../../lib/api/negotiations";
 import { useApiQuery } from "../../lib/api/useApiQuery";
 import { Button } from "../ui";
 import { Logo } from "./Logo";
@@ -33,6 +34,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
   const control = visibleNav(controlCentreNav, roles);
   const account = visibleNav(accountNav, roles);
   const negotiations = useApiQuery(commerce.some((item) => item.to === paths.negotiations) ? "nav-negotiations" : null, (signal) => listNegotiations(signal));
+  useEffect(() => onNegotiationsChanged(() => negotiations.reload()), [negotiations.reload]);
   const openNegotiations = (negotiations.data ?? []).filter((item) => OPEN_NEGOTIATION.has(item.status)).length;
   const nav = commerce.map((item) => item.to === paths.negotiations && openNegotiations > 0 ? { ...item, badge: openNegotiations } : item);
   return (

@@ -1,4 +1,5 @@
 import { apiClient } from './client'
+import { notifyNegotiationsChanged } from './negotiations'
 import type { Money, QuotePosition } from './pricing'
 
 export type RequestStatus = 'draft' | 'sent' | 'in_negotiation' | 'converted' | 'cancelled'
@@ -44,6 +45,7 @@ export interface PurchaseRequest {
   paymentTerms: string | null
   requirements: { key: string; label: string; value: string }[] | null
   message: string | null
+  offeredPrice: string | null
   buyerName: string
   buyerOrganisation: string
   viewerRole: 'buyer' | 'supplier'
@@ -63,6 +65,7 @@ export interface PurchaseRequestInput {
   requiredBy?: string
   paymentTerms?: string
   message?: string
+  offeredPrice?: string
   supplierUserIds?: string[]
 }
 
@@ -75,8 +78,18 @@ export const createPurchaseRequest = (body: PurchaseRequestInput) =>
 export const setRequestSuppliers = (id: string, supplierUserIds: string[]) =>
   apiClient.put<PurchaseRequest>(`/purchase-requests/${id}/suppliers`, { supplierUserIds })
 
+function changed<T>(pending: Promise<T>) {
+  return pending.then((result) => {
+    notifyNegotiationsChanged()
+    return result
+  })
+}
+
 export const sendPurchaseRequest = (id: string) =>
-  apiClient.post<PurchaseRequest>(`/purchase-requests/${id}/send`)
+  changed(apiClient.post<PurchaseRequest>(`/purchase-requests/${id}/send`))
 
 export const cancelPurchaseRequest = (id: string) =>
-  apiClient.post<PurchaseRequest>(`/purchase-requests/${id}/cancel`)
+  changed(apiClient.post<PurchaseRequest>(`/purchase-requests/${id}/cancel`))
+
+export const cancelRequestSupplier = (id: string, supplierUserId: string) =>
+  changed(apiClient.post<PurchaseRequest>(`/purchase-requests/${id}/suppliers/${supplierUserId}/cancel`))

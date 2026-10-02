@@ -202,11 +202,11 @@ ORGANISATIONS = [
     ("HARBOUR", "Harbour Polytrade (demo supplier)", "supplier"),
 ]
 def listing_cap(availability: str, minimum) -> Decimal | None:
-    """Demo limited offers need a spare-quantity cap. Five tonnes covers the seeded minimums."""
-    if availability != "limited":
+    """In stock and limited offers carry a sellable quantity. On request does not."""
+    if availability == "on_request":
         return None
     floor = Decimal(minimum)
-    cap = Decimal("5000")
+    cap = Decimal("20000") if availability == "in_stock" else Decimal("5000")
     return floor if floor > cap else cap
 
 

@@ -92,6 +92,23 @@ export interface StartNegotiationInput extends OfferInput {
 }
 
 const BASE = '/negotiations'
+const CHANGED_EVENT = 'sourceone-negotiations'
+
+export function notifyNegotiationsChanged() {
+  window.dispatchEvent(new Event(CHANGED_EVENT))
+}
+
+export function onNegotiationsChanged(listener: () => void) {
+  window.addEventListener(CHANGED_EVENT, listener)
+  return () => window.removeEventListener(CHANGED_EVENT, listener)
+}
+
+function changed<T>(pending: Promise<T>) {
+  return pending.then((result) => {
+    notifyNegotiationsChanged()
+    return result
+  })
+}
 
 export const listNegotiations = (signal?: AbortSignal) => apiClient.get<Negotiation[]>(BASE, { signal })
 
@@ -99,15 +116,15 @@ export const listSuppliers = (signal?: AbortSignal) => apiClient.get<Negotiation
 
 export const getNegotiation = (id: string, signal?: AbortSignal) => apiClient.get<Negotiation>(`${BASE}/${id}`, { signal })
 
-export const startNegotiation = (input: StartNegotiationInput) => apiClient.post<Negotiation>(BASE, input)
+export const startNegotiation = (input: StartNegotiationInput) => changed(apiClient.post<Negotiation>(BASE, input))
 
-export const submitOffer = (id: string, input: OfferInput) => apiClient.post<Negotiation>(`${BASE}/${id}/offers`, input)
+export const submitOffer = (id: string, input: OfferInput) => changed(apiClient.post<Negotiation>(`${BASE}/${id}/offers`, input))
 
-export const acceptNegotiation = (id: string) => apiClient.post<Negotiation>(`${BASE}/${id}/accept`)
+export const acceptNegotiation = (id: string) => changed(apiClient.post<Negotiation>(`${BASE}/${id}/accept`))
 
-export const rejectNegotiation = (id: string, reason?: string) => apiClient.post<Negotiation>(`${BASE}/${id}/reject`, { reason })
+export const rejectNegotiation = (id: string, reason?: string) => changed(apiClient.post<Negotiation>(`${BASE}/${id}/reject`, { reason }))
 
-export const cancelNegotiation = (id: string, reason?: string) => apiClient.post<Negotiation>(`${BASE}/${id}/cancel`, { reason })
+export const cancelNegotiation = (id: string, reason?: string) => changed(apiClient.post<Negotiation>(`${BASE}/${id}/cancel`, { reason }))
 
 export const answerRequirement = (id: string, key: string, status: 'met' | 'not_met', comment?: string) =>
   apiClient.post<Negotiation>(`${BASE}/${id}/requirements/${encodeURIComponent(key)}`, { status, comment: comment || null })

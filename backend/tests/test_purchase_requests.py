@@ -108,7 +108,7 @@ def test_comparison_keeps_each_suppliers_offer_and_snapshots_the_request(client,
     from tests.test_api import as_actor
     assert client.post("/api/v1/listings", json={
         "productCode": product.product_code, "minimumQuantity": "100", "askingPrice": "90.0000",
-        "currency": "INR", "availability": "in_stock",
+        "currency": "INR", "availability": "in_stock", "maximumQuantity": "20000",
     }, headers=as_actor(other)).status_code == 201
     assert client.post("/api/v1/admin/freight/rules", json={
         "originPin": "560001", "originLabel": "Bengaluru", "destinationPin": "560001",
@@ -229,3 +229,57 @@ def test_ineligible_supplier_is_rejected_and_a_draft_can_be_cancelled(client, wo
     cancelled = client.post(f"{REQUESTS}/{created['id']}/cancel", headers=buyer)
     assert cancelled.status_code == 200 and cancelled.json()["status"] == "cancelled"
     assert client.post(f"{REQUESTS}/{created['id']}/send", headers=buyer).status_code == 409
+
+
+def test_buyer_price_is_the_opening_offer(client, world, product):
+    _create(client, world, product)
+    buyer = as_user(world, "buyer")
+    created = client.post(REQUESTS, json=_body(
+        product, offeredPrice="97.5000", supplierUserIds=[str(world.users["supplier"].id)],
+    ), headers=buyer)
+    assert created.status_code == 201, created.text
+    assert created.json()["offeredPrice"] == "97.5000"
+    sent = client.post(f"{REQUESTS}/{created.json()['id']}/send", headers=buyer)
+    assert sent.status_code == 200, sent.text
+    room = client.get(f"{NEGOTIATIONS}/{sent.json()['suppliers'][0]['negotiationId']}", headers=buyer)
+    assert room.status_code == 200, room.text
+    assert room.json()["versions"][0]["offeredPrice"]["amount"] == "97.5000"
+
+
+def test_cancelling_one_supplier_leaves_the_request_open(client, world, product):
+    from sqlalchemy import select
+
+    from app.models.identity import Organisation, Role, User, UserRole
+    from tests.test_api import as_actor
+
+    _create(client, world, product)
+    other_org = Organisation(code=f"ONE-{world.suffix}", name="One Mill", org_type="supplier")
+    world.session.add(other_org)
+    world.session.flush()
+    other = User(email=f"one-{world.suffix.lower()}@test.local", full_name="One Supplier", organisation_id=other_org.id)
+    world.session.add(other)
+    world.session.flush()
+    role = world.session.scalar(select(Role).where(Role.code == "supplier"))
+    world.session.add(UserRole(user_id=other.id, role_id=role.id))
+    world.session.flush()
+    assert client.post("/api/v1/listings", json={
+        "productCode": product.product_code, "minimumQuantity": "100", "askingPrice": "90.0000",
+        "currency": "INR", "availability": "in_stock", "maximumQuantity": "20000",
+    }, headers=as_actor(other)).status_code == 201
+    buyer = as_user(world, "buyer")
+    created = client.post(REQUESTS, json=_body(
+        product, supplierUserIds=[str(world.users["supplier"].id), str(other.id)],
+    ), headers=buyer)
+    assert created.status_code == 201, created.text
+    sent = client.post(f"{REQUESTS}/{created.json()['id']}/send", headers=buyer)
+    assert sent.status_code == 200, sent.text
+    cancelled = client.post(
+        f"{REQUESTS}/{created.json()['id']}/suppliers/{world.users['supplier'].id}/cancel",
+        headers=buyer,
+    )
+    assert cancelled.status_code == 200, cancelled.text
+    body = cancelled.json()
+    assert body["status"] == "sent"
+    rows = {row["supplierUserId"]: row["negotiationStatus"] for row in body["suppliers"]}
+    assert rows[str(world.users["supplier"].id)] == "cancelled"
+    assert rows[str(other.id)] == "open"

@@ -10,6 +10,8 @@ from typing import Literal
 from sqlalchemy import or_, select, text
 from sqlalchemy.orm import Session, selectinload
 
+from app.catalogue import products as catalogue
+from app.catalogue.listings import take_stock
 from app.catalogue.specifications import requirement_snapshot
 from app.core.clock import business_today, utcnow
 from app.core.errors import DuplicateOrder, InvalidStateTransition, NotFound, OrderClosed, PermissionDenied, ValidationFailed
@@ -17,7 +19,8 @@ from app.freight import service as freight
 from app.identity.service import Actor
 from app.models.approval import OrderApproval
 from app.models.identity import Organisation, User
-from app.models.negotiation import Negotiation
+from app.models.listing import SupplierListing
+from app.models.negotiation import Negotiation, NegotiationVersion
 from app.models.order import Order, OrderStatusEvent
 from app.negotiation import service as negotiations
 from app.negotiation.constants import NegotiationPermission, NegotiationStatus
@@ -82,6 +85,61 @@ def _freight_snapshot(session: Session, negotiation: Negotiation, accepted, pin:
         "amount": result["freight"] if estimated else None,
         "match": result["match"] if estimated else None,
     }
+
+
+def place_at_asking_price(
+    session: Session, actor: Actor, *, product_code: str, supplier_user_id: uuid.UUID, quantity: Decimal,
+    destination_pin: str, freight_basis: str = "standard", now: datetime | None = None,
+) -> Order | OrderApproval:
+    """Buy the listing at its asking price. No counter-offer. Stock moves only if the order is created."""
+    actor.require(OrderPermission.PLACE)
+    now = now or utcnow()
+    product = catalogue.get_active_product(session, product_code)
+    listing = session.scalar(
+        select(SupplierListing).where(
+            SupplierListing.supplier_user_id == supplier_user_id,
+            SupplierListing.product_id == product.id,
+            SupplierListing.is_active.is_(True),
+        ).with_for_update()
+    )
+    if listing is None:
+        raise NotFound("That supplier is not listing this product")
+    if listing.availability == "on_request" or listing.maximum_quantity is None:
+        raise ValidationFailed("This supplier has not confirmed stock. Ask them instead.")
+    if quantity < listing.minimum_quantity or quantity > listing.maximum_quantity:
+        raise ValidationFailed(
+            "That quantity is outside what this supplier can sell now",
+            details={"available": f"{listing.maximum_quantity.normalize():f}"},
+        )
+    negotiation = negotiations.create_negotiation(
+        session, actor, product_code=product_code, quantity=quantity, supplier_user_id=supplier_user_id,
+        destination_pin=destination_pin, freight_basis=freight_basis, currency=listing.currency, now=now,
+    )
+    version = NegotiationVersion(
+        negotiation_id=negotiation.id,
+        version_number=1,
+        created_by_user_id=listing.supplier_user_id,
+        offered_price=listing.asking_price,
+        currency=listing.currency,
+        quantity=quantity,
+        uom=listing.uom,
+        message="Listed asking price.",
+        created_at=now,
+    )
+    session.add(version)
+    session.flush()
+    negotiation.status = NegotiationStatus.OPEN
+    negotiation.updated_at = now
+    session.flush()
+    negotiation.accepted_version_id = version.id
+    negotiation.status = NegotiationStatus.ACCEPTED
+    negotiation.closed_at = now
+    negotiation.closed_by_user_id = actor.user_id
+    negotiation.updated_at = now
+    session.flush()
+    return create_from_negotiation(
+        session, actor, negotiation.id, destination_pin=destination_pin, freight_basis=freight_basis, now=now,
+    )
 
 
 def create_from_negotiation(
@@ -174,6 +232,7 @@ def _insert_order(session, actor, negotiation, accepted, pin: str, freight_basis
     )
     session.add(order)
     session.flush()
+    take_stock(session, negotiation.supplier_user_id, negotiation.product_id, accepted.quantity)
     _record_event(session, order, None, actor, note=None, now=now)
     from app.purchase_requests.service import mark_converted
     mark_converted(session, negotiation.id)

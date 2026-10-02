@@ -1,5 +1,5 @@
 import { Search } from "lucide-react";
-import { Fragment, useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { paths } from "../../app/paths";
 import { AsyncContent } from "../../components/feedback/AsyncContent";
@@ -13,11 +13,26 @@ import { getErrorMessage } from "../../lib/api/client";
 import { listSupplierMatches } from "../../lib/api/listings";
 import { listProducts } from "../../lib/api/products";
 import { getNegotiation, type Negotiation } from "../../lib/api/negotiations";
-import { cancelPurchaseRequest, createPurchaseRequest, listPurchaseRequests, sendPurchaseRequest, type PurchaseRequest } from "../../lib/api/purchaseRequests";
+import { isPlacedOrder, placeAtAsking } from "../../lib/api/orders";
+import { cancelPurchaseRequest, cancelRequestSupplier, createPurchaseRequest, listPurchaseRequests, sendPurchaseRequest, type PurchaseRequest } from "../../lib/api/purchaseRequests";
 import { useApiQuery } from "../../lib/api/useApiQuery";
-import { formatMoney, formatSignedMoney, titleCase } from "../../lib/pricingFormat";
+import { formatMoney, formatSignedMoney, orderCharges, previewOrderTotal, titleCase } from "../../lib/pricingFormat";
+import { tradeDecision } from "../../lib/tradeDecision";
 
 const STATUS_TONE = { draft: "neutral", sent: "info", in_negotiation: "warning", converted: "positive", cancelled: "negative" } as const;
+
+function headlineStatus(request: PurchaseRequest): PurchaseRequest["status"] {
+  const talks = request.suppliers.map((row) => row.negotiationStatus).filter((status): status is string => Boolean(status));
+  if (talks.length > 1) {
+    const open = talks.filter((status) => status !== "cancelled" && status !== "rejected");
+    if (open.length > 0) {
+      if (request.status === "converted") return "converted";
+      if (open.some((status) => status === "countered" || status === "accepted")) return "in_negotiation";
+      return request.status === "draft" ? "draft" : "sent";
+    }
+  }
+  return request.status;
+}
 
 function freightText(request: PurchaseRequest) {
   const row = request.suppliers[0];
@@ -26,25 +41,28 @@ function freightText(request: PurchaseRequest) {
   return "Freight on request";
 }
 
-function RequestModal({ productCode, quantity, pin, supplierId, onClose, onCreated }: {
+function RequestModal({ productCode, quantity, pin, price, supplierId, onClose, onCreated }: {
   productCode: string;
   quantity: string;
   pin: string;
+  price: string;
   supplierId?: string;
   onClose: () => void;
   onCreated: () => void;
 }) {
+  const navigate = useNavigate();
   const products = useApiQuery("rfq-products", (signal) => listProducts({}, signal));
   const [code, setCode] = useState(productCode);
   const [amount, setAmount] = useState(quantity || "1000");
   const [destination, setDestination] = useState(pin || readDeliveryPin());
+  const [buyerPrice, setBuyerPrice] = useState(price);
+  const [priceDirty, setPriceDirty] = useState(Boolean(price));
   const [message, setMessage] = useState("");
   const [requiredBy, setRequiredBy] = useState("");
   const [paymentTerms, setPaymentTerms] = useState("");
   const [freightBasis, setFreightBasis] = useState<"standard" | "distance">("standard");
-  const [supplierIds, setSupplierIds] = useState<string[]>([]);
-  const appliedSupplier = useRef(false);
-  const [busy, setBusy] = useState(false);
+  const [busySupplier, setBusySupplier] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const selected = (products.data ?? []).find((item) => item.productCode === code) ?? null;
   const pinOk = /^[1-9][0-9]{5}$/.test(destination);
@@ -53,21 +71,22 @@ function RequestModal({ productCode, quantity, pin, supplierId, onClose, onCreat
     code && selected && pinOk && quantityOk ? `rfq-matches:${code}:${amount}:${destination}` : null,
     (signal) => listSupplierMatches(code, { quantity: amount, uom: selected?.uom.code ?? "KG", destinationPin: destination }, signal),
   );
+  const listed = (matches.data?.matches ?? []).filter((match) => !supplierId || match.supplierUserId === supplierId);
+  const several = listed.length > 1;
+  const baseline = listed.length === 0 ? "" : several
+    ? (listed.reduce((sum, match) => sum + Number(match.askingPrice.amount), 0) / listed.length).toFixed(4)
+    : listed[0].askingPrice.amount;
   useEffect(() => {
-    if (appliedSupplier.current || !supplierId || !matches.data) return;
-    if (matches.data.matches.some((match) => match.supplierUserId === supplierId)) {
-      setSupplierIds([supplierId]);
-      appliedSupplier.current = true;
-    }
-  }, [supplierId, matches.data]);
-  const chosen = (matches.data?.matches ?? []).filter((item) => supplierIds.includes(item.supplierUserId));
-  const toggleSupplier = (id: string) => setSupplierIds((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id]);
-  const submit = async () => {
-    if (!selected) return;
-    setBusy(true);
+    if (priceDirty || !baseline) return;
+    setBuyerPrice(baseline);
+  }, [baseline, priceDirty]);
+  const askOrNegotiate = async (supplierUserId: string, offeredPrice: string) => {
+    if (!selected || !(Number(offeredPrice) > 0)) return;
+    setBusySupplier(supplierUserId);
     setError(null);
+    setNotice(null);
     try {
-      await createPurchaseRequest({
+      const draft = await createPurchaseRequest({
         productCode: selected.productCode,
         quantity: amount,
         uom: selected.uom.code,
@@ -76,26 +95,53 @@ function RequestModal({ productCode, quantity, pin, supplierId, onClose, onCreat
         requiredBy: requiredBy || undefined,
         paymentTerms: paymentTerms || undefined,
         message: message.trim() || undefined,
-        supplierUserIds: supplierIds,
+        offeredPrice,
+        supplierUserIds: [supplierUserId],
       });
+      await sendPurchaseRequest(draft.id);
+      setNotice("Negotiation sent at your price.");
       onCreated();
-      onClose();
     } catch (cause) {
       setError(getErrorMessage(cause));
-      setBusy(false);
+    } finally {
+      setBusySupplier(null);
+    }
+  };
+  const place = async (supplierUserId: string) => {
+    if (!selected) return;
+    setBusySupplier(supplierUserId);
+    setError(null);
+    setNotice(null);
+    try {
+      const result = await placeAtAsking({
+        productCode: selected.productCode,
+        supplierUserId,
+        quantity: amount,
+        destinationPin: destination,
+        freightBasis,
+      });
+      if (isPlacedOrder(result)) navigate(`${paths.orders}?id=${encodeURIComponent(result.id)}`);
+      else setNotice("Submitted for approval. No order exists until someone else in the company approves the material total.");
+    } catch (cause) {
+      setError(getErrorMessage(cause));
+    } finally {
+      setBusySupplier(null);
     }
   };
   return (
-    <Modal open title="Create purchase request" onClose={onClose}>
+    <Modal open className="modal--wide" title="Create purchase request" onClose={onClose}>
       <div className="form-grid request-form">
         <label>Product
-          <select className="field-select" aria-label="Product" value={code} onChange={(event) => { setCode(event.target.value); setSupplierIds([]); }}>
+          <select className="field-select" aria-label="Product" value={code} onChange={(event) => { setCode(event.target.value); setPriceDirty(false); }}>
             <option value="">Select a product</option>
             {(products.data ?? []).map((item) => <option key={item.productCode} value={item.productCode}>{item.name}</option>)}
           </select>
         </label>
         <label>Quantity<div className="input-combo"><Input value={amount} onChange={(event) => setAmount(event.target.value)} /><span>{selected?.uom.code ?? "UOM"}</span></div></label>
         <label>Delivery PIN<Input value={destination} onChange={(event) => setDestination(event.target.value)} placeholder="6-digit PIN" /></label>
+        <label>{several ? "Average price" : "Your price"}
+          <Input inputMode="decimal" aria-label={several ? "Average price" : "Your price"} value={buyerPrice} onChange={(event) => { setPriceDirty(true); setBuyerPrice(event.target.value); }} />
+        </label>
         <label>Required by<Input type="date" aria-label="Required by" value={requiredBy} onChange={(event) => setRequiredBy(event.target.value)} /></label>
         <label>Payment terms
           <select className="field-select" aria-label="Payment terms" value={paymentTerms} onChange={(event) => setPaymentTerms(event.target.value)}>
@@ -112,28 +158,45 @@ function RequestModal({ productCode, quantity, pin, supplierId, onClose, onCreat
             <option value="distance">Road distance</option>
           </select>
         </label>
-        <div className="form-grid__wide">
-          <span className="match-label">Suppliers</span>
-          {!code ? <p className="request-note">Choose a product first.</p> : !pinOk ? <p className="request-note">Enter a delivery PIN to match suppliers.</p> : matches.isLoading ? <p className="request-note">Matching suppliers…</p> : (
-            <ul className="match-pick">{(matches.data?.matches ?? []).map((match) => (
-              <li key={match.supplierUserId}>
-                <label>
-                  <input type="checkbox" checked={supplierIds.includes(match.supplierUserId)} disabled={!match.meetsMinimum} onChange={() => toggleSupplier(match.supplierUserId)} />
-                  {match.organisation.replace(/\s*\(demo supplier\)\s*$/i, "")} · {match.supplierName} · {formatMoney(match.askingPrice)} · {match.meetsMinimum ? "Minimum met" : "Below minimum"}
-                </label>
-              </li>
-            ))}</ul>
-          )}
-        </div>
-        <label className="form-grid__wide">Message<Input value={message} onChange={(event) => setMessage(event.target.value)} placeholder="Optional note to the supplier" /></label>
+        <label>Message<Input value={message} onChange={(event) => setMessage(event.target.value)} placeholder="Optional note" /></label>
       </div>
-      <p className="request-note">Sending asks the selected supplier through a negotiation at their current asking price. Freight stays an estimate, and no order is created.</p>
-      {chosen.map((match) => <ul key={match.supplierUserId} className="match-reasons">{match.reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul>)}
-      {matches.data && matches.data.matches.length === 0 && <p className="request-note">No supplier is listing this product.</p>}
+      <p className="request-note">{several ? "Leave the average to order at each supplier’s asking price where stock allows. Change it and a supplier above that price is a negotiation." : "Leave the asking price to place the order where stock allows. Change it to negotiate."} Payable is an estimate.</p>
+      {!code ? <p className="request-note">Choose a product first.</p> : !pinOk ? <p className="request-note">Enter a delivery PIN to see freight and the amount payable.</p> : matches.isLoading ? <p className="request-note">Matching suppliers…</p> : listed.length === 0 ? <p className="request-note">No supplier is listing this product.</p> : (
+        <div className="market-table-wrap">
+          <table className="market-table">
+            <thead><tr><th>Supplier</th><th>Asking</th><th>Material</th><th>Freight</th><th>GST</th><th>Payable</th><th/></tr></thead>
+            <tbody>
+              {listed.map((match) => {
+                const choice = tradeDecision(match, Number(amount), buyerPrice, baseline, several);
+                const material = previewOrderTotal(amount, { amount: choice.unit || match.askingPrice.amount, currency: match.askingPrice.currency });
+                const freight = match.comparison.freight;
+                const charges = orderCharges(material, freight);
+                const name = match.organisation.replace(/\s*\(demo supplier\)\s*$/i, "");
+                const busy = busySupplier === match.supplierUserId;
+                return (
+                  <tr key={match.supplierUserId}>
+                    <td><strong>{name}</strong><small>{titleCase(match.availability)}{match.maximumQuantity ? ` · ${Number(match.maximumQuantity).toLocaleString("en-IN")} ${match.uom.toLowerCase()}` : ""}</small></td>
+                    <td>{formatMoney(match.askingPrice)}</td>
+                    <td>{formatMoney(material, 2)}</td>
+                    <td>{freight ? formatMoney(freight) : "On request"}</td>
+                    <td>{formatMoney(charges.gst, 2)}</td>
+                    <td>{formatMoney(charges.payable, 2)}</td>
+                    <td>
+                      {choice.action === "place" && <Button disabled={busy} onClick={() => void place(match.supplierUserId)}>Place order</Button>}
+                      {choice.action === "negotiate" && <Button variant="secondary" disabled={busy || !(Number(choice.unit) > 0)} onClick={() => void askOrNegotiate(match.supplierUserId, choice.unit)}>Negotiate</Button>}
+                      {choice.action === "ask" && <Button disabled={busy || !(Number(choice.unit) > 0)} onClick={() => void askOrNegotiate(match.supplierUserId, choice.unit)}>Ask {name}</Button>}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {notice && <p className="request-note">{notice}</p>}
       {error && <p className="negative">{error}</p>}
       <div className="modal-actions">
         <Button variant="secondary" onClick={onClose}>Close</Button>
-        <Button disabled={!selected || !(Number(amount) > 0) || !pinOk || busy} onClick={() => void submit()}>{busy ? "Saving…" : "Save draft"}</Button>
       </div>
     </Modal>
   );
@@ -164,11 +227,12 @@ export function PurchaseRequestsWorkspace() {
       setError(getErrorMessage(cause));
     }
   };
-  const act = async (id: string, action: "send" | "cancel") => {
-    setBusyId(id);
+  const act = async (id: string, action: "send" | "cancel" | "cancel-supplier", supplierUserId?: string) => {
+    setBusyId(supplierUserId ? `${id}:${supplierUserId}` : id);
     setError(null);
     try {
       if (action === "send") await sendPurchaseRequest(id);
+      else if (action === "cancel-supplier" && supplierUserId) await cancelRequestSupplier(id, supplierUserId);
       else await cancelPurchaseRequest(id);
       reload();
     } catch (cause) {
@@ -207,12 +271,12 @@ export function PurchaseRequestsWorkspace() {
                   <td>{request.destinationPin}</td>
                   <td>{several ? <strong>{request.suppliers.length} suppliers</strong> : supplier ? <><strong><OrgLink organisationId={supplier.organisationId}>{supplier.organisation}</OrgLink></strong><small>{supplier.supplierName}</small></> : <small>Not selected</small>}</td>
                   <td>{several ? "Per supplier" : freightText(request)}</td>
-                  <td><Badge tone={STATUS_TONE[request.status]}>{titleCase(request.status)}</Badge></td>
+                  <td><Badge tone={STATUS_TONE[headlineStatus(request)]}>{titleCase(headlineStatus(request))}</Badge></td>
                   <td onClick={(event) => event.stopPropagation()}>
                     {request.canSend && <Button disabled={busyId === request.id} onClick={() => void act(request.id, "send")}>Send</Button>}
                     {!several && supplier?.negotiationId && <Button variant="secondary" onClick={() => navigate(`${paths.negotiations}?id=${encodeURIComponent(supplier.negotiationId ?? "")}`)}>Open negotiation</Button>}
-                    {several && <small>{open ? "Negotiations are open below" : "Expand to engage in negotiations"}</small>}
-                    {request.canCancel && <Button variant="ghost" disabled={busyId === request.id} onClick={() => void act(request.id, "cancel")}>Cancel</Button>}
+                    {several && <small>{open ? "Each supplier is listed below" : "Expand for each supplier"}</small>}
+                    {request.canCancel && !several && <Button variant="ghost" disabled={busyId === request.id} onClick={() => void act(request.id, "cancel")}>Cancel</Button>}
                   </td>
                 </tr>
                 {open && request.suppliers.length > 0 && (
@@ -237,6 +301,9 @@ export function PurchaseRequestsWorkspace() {
                             <td>
                               {row.negotiationId && <Button variant="secondary" onClick={() => navigate(`${paths.negotiations}?id=${encodeURIComponent(row.negotiationId ?? "")}`)}>Open negotiation</Button>}
                               {buyer && row.negotiationStatus === "accepted" && row.negotiationId && <Button onClick={() => void placeOrder(row.negotiationId ?? "")}>Place order</Button>}
+                              {buyer && row.negotiationId && row.negotiationStatus && !["accepted", "rejected", "cancelled"].includes(row.negotiationStatus) && (
+                                <Button variant="ghost" disabled={busyId === `${request.id}:${row.supplierUserId}`} onClick={() => void act(request.id, "cancel-supplier", row.supplierUserId)}>Cancel</Button>
+                              )}
                             </td>
                           </tr>
                         ))}
@@ -255,6 +322,7 @@ export function PurchaseRequestsWorkspace() {
           productCode={searchParams.get("product") ?? ""}
           quantity={searchParams.get("quantity") ?? ""}
           pin={searchParams.get("pin") ?? ""}
+          price={searchParams.get("price") ?? ""}
           supplierId={searchParams.get("supplier") ?? undefined}
           onClose={() => setCreating(false)}
           onCreated={reload}

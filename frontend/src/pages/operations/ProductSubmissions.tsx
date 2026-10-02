@@ -26,7 +26,7 @@ export function SupplierSubmissionForm() {
   const ready = Boolean(
     draft.proposedCode.trim() && draft.name.trim() && draft.category.trim()
     && Number(draft.askingPrice) > 0 && Number(draft.minimumQuantity) > 0
-    && (draft.availability !== "limited" || (Number(draft.maximumQuantity) >= Number(draft.minimumQuantity) && Number(draft.maximumQuantity) > 0))
+    && (draft.availability === "on_request" || (Number(draft.maximumQuantity) >= Number(draft.minimumQuantity) && Number(draft.maximumQuantity) > 0))
     && SPEC_FIELDS.every(([key]) => draft.specifications[key]?.trim()),
   );
   const send = async () => {
@@ -44,7 +44,7 @@ export function SupplierSubmissionForm() {
         askingPrice: draft.askingPrice,
         currency: draft.currency,
         minimumQuantity: draft.minimumQuantity,
-        maximumQuantity: draft.availability === "limited" ? draft.maximumQuantity : null,
+        maximumQuantity: draft.availability === "on_request" ? null : draft.maximumQuantity,
         availability: draft.availability,
       });
       setDraft({ ...EMPTY, specifications: { ...EMPTY_SPECS } });
@@ -77,8 +77,8 @@ export function SupplierSubmissionForm() {
           </select>
         </label>
         <label>Minimum quantity<Input aria-label="Minimum quantity" value={draft.minimumQuantity} onChange={(event) => setDraft({ ...draft, minimumQuantity: event.target.value })} /></label>
-        {draft.availability === "limited" && (
-          <label>Available up to<Input aria-label="Available quantity" value={draft.maximumQuantity} onChange={(event) => setDraft({ ...draft, maximumQuantity: event.target.value })} /></label>
+        {draft.availability !== "on_request" && (
+          <label>Available quantity<Input aria-label="Available quantity" value={draft.maximumQuantity} onChange={(event) => setDraft({ ...draft, maximumQuantity: event.target.value })} /></label>
         )}
         <label>Availability
           <select className="input" aria-label="Availability" value={draft.availability} onChange={(event) => setDraft({ ...draft, availability: event.target.value as ListingAvailability })}>
